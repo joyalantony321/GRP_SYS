@@ -1,0 +1,73 @@
+{
+  "cards": [
+    {
+      "id": "1",
+      "quoteNumber": "CLX/2602/MM/4185",
+      "date": "2026-02-03",
+      "salesPerson": "Midhun Murali",
+      "subject": "Supply and install of GRP Panel Water Tank",
+      "projectLocation": "G+30+Roof(Binghatti Tulip), JVC Project",
+      "list": "Quotation",
+      "remarks": [
+        {
+          "id": "r1",
+          "list": "Quotation",
+          "type": "Active",
+          "tags": ["urgent", "follow-up"],
+          "description": "Client requested revised pricing for 50% capacity increase. Need to recalculate material costs and submit by end of week.",
+          "createdBy": "Midhun Murali",
+          "createdAt": "2026-02-04T14:13:10Z",
+          "updatedAt": "2026-02-04T14:13:10Z"
+        }
+      ],
+      "createdAt": "2026-02-03T09:30:00Z",
+      "updatedAt": "2026-02-04T14:13:10Z"
+    },
+    {
+      "id": "2",
+      "quoteNumber": "GRPPT/2602/SA/4186",
+      "date": "2026-02-03",
+      "salesPerson": "Saleesh Antony",
+      "subject": "Supply of GRP Sectional Water Storage Tank",
+      "projectLocation": "The Heights Tower, Business Bay, Dubai",
+      "list": "Quotation",
+      "remarks": [
+        {
+          "id": "r2",
+          "list": "Quotation",
+          "type": "Pending",
+          "tags": ["waiting"],
+          "description": "Waiting for site inspection report from consultant. Expected by 05/02/2026.",
+          "createdBy": "Saleesh Antony",
+          "createdAt": "2026-02-04T10:30:00Z",
+          "updatedAt": "2026-02-04T10:30:00Z"
+        }
+      ],
+      "createdAt": "2026-02-03T10:15:00Z",
+      "updatedAt": "2026-02-04T10:30:00Z"
+    },
+    {
+      "id": "3",
+      "quoteNumber": "GRP/2602/MM/4187",
+      "date": "2026-02-03",
+      "salesPerson": "Midhun Murali",
+      "subject": "Supply and Installation of Hot Pressed GRP Tank",
+      "projectLocation": "Yas Bay Residential Complex, Yas Island",
+      "list": "LPO",
+      "remarks": [
+        {
+          "id": "r3",
+          "list": "LPO",
+          "type": "Inactive",
+          "tags": ["completed"],
+          "description": "LPO received and confirmed. Delivery scheduled for 15/02/2026. Installation team assigned.",
+          "createdBy": "Admin",
+          "createdAt": "2026-02-04T09:45:30Z",
+          "updatedAt": "2026-02-04T09:45:30Z"
+        }
+      ],
+      "createdAt": "2026-02-03T11:00:00Z",
+      "updatedAt": "2026-02-04T09:45:30Z"
+    }
+  ]
+}

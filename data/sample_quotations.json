@@ -1,0 +1,211 @@
+{
+  "quotations": [
+    {
+      "id": 1,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Umer Farook Abdul Kareem",
+        "role": "Jr. Procurement Engineer",
+        "company": "Binghatti",
+        "location": "Ajman, UAE",
+        "phone": "+971 50 639 5486",
+        "email": "joyalantony321@gmail.com"
+      },
+      "quote_number": "CLX/2602/MM/4185",
+      "date": "2026-02-03",
+      "sales_person": "Midhun Murali",
+      "subject": "Supply and install of GRP Panel Water Tank",
+      "project_location": "G+30+Roof(Binghatti Tulip), JVC Project",
+      "status": "draft",
+      "created_at": "2026-02-03T09:30:00Z",
+      "updated_at": "2026-02-03T09:30:00Z"
+    },
+    {
+      "id": 2,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Ahmed Hassan Al Mansoori",
+        "role": "Procurement Manager",
+        "company": "Emaar Properties",
+        "location": "Dubai, UAE",
+        "phone": "+971 52 748 3921",
+        "email": "ahmed.hassan@emaar.ae"
+      },
+      "quote_number": "GRPPT/2602/SA/4186",
+      "date": "2026-02-03",
+      "sales_person": "Saleesh Antony",
+      "subject": "Supply of GRP Sectional Water Storage Tank",
+      "project_location": "The Heights Tower, Business Bay, Dubai",
+      "status": "sent",
+      "created_at": "2026-02-03T10:15:00Z",
+      "updated_at": "2026-02-03T14:20:00Z"
+    },
+    {
+      "id": 3,
+      "recipient": {
+        "title": "Ms.",
+        "name": "Fatima Abdullah Al Zaabi",
+        "role": "Project Engineer",
+        "company": "Aldar Properties",
+        "location": "Abu Dhabi, UAE",
+        "phone": "+971 50 892 1456",
+        "email": "f.alzaabi@aldar.com"
+      },
+      "quote_number": "GRP/2602/MM/4187",
+      "date": "2026-02-03",
+      "sales_person": "Midhun Murali",
+      "subject": "Supply and Installation of Hot Pressed GRP Tank",
+      "project_location": "Yas Bay Residential Complex, Yas Island",
+      "status": "approved",
+      "created_at": "2026-02-03T11:00:00Z",
+      "updated_at": "2026-02-05T16:45:00Z"
+    },
+    {
+      "id": 4,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Rajesh Kumar Sharma",
+        "role": "Senior MEP Engineer",
+        "company": "Sobha Realty",
+        "location": "Dubai, UAE",
+        "phone": "+971 55 234 7890",
+        "email": "rajesh.sharma@sobha.com"
+      },
+      "quote_number": "CLX/2602/SA/4188",
+      "date": "2026-02-04",
+      "sales_person": "Saleesh Antony",
+      "subject": "Supply of Sectional Panel Type GRP Water Tank",
+      "project_location": "Sobha Hartland II, Mohammed Bin Rashid City",
+      "status": "rejected",
+      "created_at": "2026-02-04T08:20:00Z",
+      "updated_at": "2026-02-06T10:30:00Z"
+    },
+    {
+      "id": 5,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Mohammed Khalid Al Shamsi",
+        "role": "Procurement Specialist",
+        "company": "Nakheel",
+        "location": "Dubai, UAE",
+        "phone": "+971 50 123 4567",
+        "email": "m.shamsi@nakheel.ae"
+      },
+      "quote_number": "GRPPT/2602/MM/4189",
+      "date": "2026-02-04",
+      "sales_person": "Midhun Murali",
+      "subject": "Supply and install of GRP Water Storage Tank",
+      "project_location": "Palm Jumeirah Villas, Phase 3",
+      "status": "pending",
+      "created_at": "2026-02-04T09:45:00Z",
+      "updated_at": "2026-02-04T09:45:00Z"
+    },
+    {
+      "id": 6,
+      "recipient": {
+        "title": "Ms.",
+        "name": "Sarah Jennifer Williams",
+        "role": "Technical Buyer",
+        "company": "DAMAC Properties",
+        "location": "Dubai, UAE",
+        "phone": "+971 52 987 6543",
+        "email": "s.williams@damac.ae"
+      },
+      "quote_number": "GRP/2602/SA/4190",
+      "date": "2026-02-04",
+      "sales_person": "Saleesh Antony",
+      "subject": "Supply of GRP Panel Water Tank with Accessories",
+      "project_location": "DAMAC Hills 2, Dubai Land",
+      "status": "sent",
+      "created_at": "2026-02-04T13:30:00Z",
+      "updated_at": "2026-02-04T16:00:00Z"
+    },
+    {
+      "id": 7,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Abdul Rahman Al Mazroui",
+        "role": "Chief Procurement Officer",
+        "company": "Meraas Holding",
+        "location": "Dubai, UAE",
+        "phone": "+971 50 456 7891",
+        "email": "a.almazroui@meraas.ae"
+      },
+      "quote_number": "CLX/2602/MM/4191",
+      "date": "2026-02-05",
+      "sales_person": "Midhun Murali",
+      "subject": "Supply and Installation of Sectional GRP Tank",
+      "project_location": "City Walk Extension, Al Wasl",
+      "status": "draft",
+      "created_at": "2026-02-05T08:00:00Z",
+      "updated_at": "2026-02-05T08:00:00Z"
+    },
+    {
+      "id": 8,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Vikram Singh Rathore",
+        "role": "Assistant Procurement Manager",
+        "company": "Azizi Developments",
+        "location": "Dubai, UAE",
+        "phone": "+971 55 789 0123",
+        "email": "vikram.rathore@azizi.ae"
+      },
+      "quote_number": "GRPPT/2602/SA/4192",
+      "date": "2026-02-05",
+      "sales_person": "Saleesh Antony",
+      "subject": "Supply of Hot Pressed GRP Water Tank",
+      "project_location": "Azizi Riviera, Meydan City",
+      "status": "approved",
+      "created_at": "2026-02-05T10:30:00Z",
+      "updated_at": "2026-02-07T11:15:00Z"
+    },
+    {
+      "id": 9,
+      "recipient": {
+        "title": "Ms.",
+        "name": "Layla Mohammed Al Hashemi",
+        "role": "MEP Coordinator",
+        "company": "Dubai Properties",
+        "location": "Dubai, UAE",
+        "phone": "+971 50 321 6547",
+        "email": "layla.alhashemi@dp.ae"
+      },
+      "quote_number": "GRP/2602/MM/4193",
+      "date": "2026-02-05",
+      "sales_person": "Midhun Murali",
+      "subject": "Supply and install of GRP Panel Type Water Tank",
+      "project_location": "Jumeirah Beach Residence Tower 5",
+      "status": "sent",
+      "created_at": "2026-02-05T14:00:00Z",
+      "updated_at": "2026-02-05T15:30:00Z"
+    },
+    {
+      "id": 10,
+      "recipient": {
+        "title": "Mr.",
+        "name": "Pradeep Kumar Nair",
+        "role": "Procurement Head",
+        "company": "Deyaar Development",
+        "location": "Dubai, UAE",
+        "phone": "+971 52 654 3210",
+        "email": "pradeep.nair@deyaar.ae"
+      },
+      "quote_number": "CLX/2602/SA/4194",
+      "date": "2026-02-06",
+      "sales_person": "Saleesh Antony",
+      "subject": "Supply of Sectional GRP Water Storage Tank",
+      "project_location": "Business Bay Executive Towers",
+      "status": "pending",
+      "created_at": "2026-02-06T09:00:00Z",
+      "updated_at": "2026-02-06T09:00:00Z"
+    }
+  ],
+  "metadata": {
+    "total_count": 10,
+    "generated_date": "2026-02-06",
+    "description": "Sample quotation data for GRP water tank quotation system",
+    "statuses": ["draft", "pending", "sent", "approved", "rejected"],
+    "companies": ["GRP TANKS TRADING L.L.C", "GRP PIPECO TANKS TRADING L.L.C", "COLEX TANKS TRADING L.L.C"]
+  }
+}
