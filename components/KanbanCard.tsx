@@ -20,6 +20,7 @@ interface Props {
 
 export default function KanbanCard({ card, index, onClick, onDelete, onApprove, onTerminate, onUnterminate, onAssignUser, onUpdateWorkStatus, userRole, currentList }: Props) {
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [isExpanded, setIsExpanded] = useState(false); // Both admin and user cards start collapsed
 
   const loadUsers = () => {
     const appDataStr = localStorage.getItem('appData');
@@ -48,19 +49,27 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   }, []);
 
   const getCardColor = () => {
+    // Priority: Terminated and Approved states override remark colors
+    if (card.terminated) {
+      return 'border-l-4 border-l-gray-500 bg-gray-200'; // Grey for terminated
+    }
+    if (card.approved) {
+      return 'border-l-4 border-l-green-500 bg-green-100'; // Light green for approved
+    }
+
     const listRemarks = card.remarks.filter(r => r.list === currentList);
     if (listRemarks.length === 0) return '';
 
     const latestRemark = listRemarks[listRemarks.length - 1];
 
-    // PERMANENT: Maximum brightness for card backgrounds - DO NOT CHANGE
+    // Very light colors for better readability
     switch (latestRemark.type) {
       case 'Active':
-        return 'border-l-4 border-l-red-600 bg-red-400'; // Maximum bright red
+        return 'border-l-4 border-l-red-500 bg-red-100'; // Very light red
       case 'Pending':
-        return 'border-l-4 border-l-yellow-500 bg-yellow-100';
+        return 'border-l-4 border-l-yellow-500 bg-yellow-50';
       case 'Inactive':
-        return 'border-l-4 border-l-blue-600 bg-blue-400'; // Maximum bright blue
+        return 'border-l-4 border-l-blue-500 bg-blue-100'; // Very light blue
       default:
         return '';
     }
@@ -111,6 +120,14 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const hasRemarks = card.remarks.filter(r => r.list === currentList).length > 0;
   const latestListRemark = getLatestListRemark();
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Toggle expansion state for both admin and user
+    setIsExpanded(!isExpanded);
+  };
+
+  const cardColorClasses = getCardColor();
+  const bgClass = cardColorClasses ? '' : 'bg-white'; // Only use bg-white if no color is set
+
   return (
     <Draggable draggableId={card.id} index={index} isDragDisabled={userRole !== 'admin'}>
       {(provided, snapshot) => (
@@ -118,11 +135,33 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          onClick={onClick}
-          className={`bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer ${
+          onClick={handleCardClick}
+          className={`${cardColorClasses} ${bgClass} rounded-lg shadow-sm hover:shadow-md transition-all cursor-pointer ${
             snapshot.isDragging ? 'shadow-2xl scale-105 rotate-2' : ''
-          } ${getCardColor()}`}
+          } ${isExpanded ? 'p-4' : 'p-2'}`}
         >
+      {/* Condensed View (Collapsed) */}
+      {!isExpanded ? (
+        <div className="flex items-center justify-between gap-2 min-h-0 py-1">
+          <div className="font-semibold text-gray-800 text-xs truncate flex-shrink">
+            {card.quoteNumber}
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {userRole === 'admin' && card.assignedTo && (
+              <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                {card.assignedTo}
+              </span>
+            )}
+            {card.userWorkStatus && (
+              <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${getWorkStatusColor(card.userWorkStatus)}`}>
+                {card.userWorkStatus}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Full/Expanded View */
+        <>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-gray-800 text-sm mb-2">
@@ -156,33 +195,39 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               </>
             )}
             {userRole === 'user' && onUpdateWorkStatus && (
-              <select
-                value={card.userWorkStatus || 'Assigned'}
-                onChange={(e) => {
-                  e.stopPropagation();
-                  onUpdateWorkStatus(card.id, e.target.value as UserWorkStatus);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className={`px-2 py-1 rounded-full text-xs font-medium border-none outline-none cursor-pointer ${getWorkStatusColor(card.userWorkStatus)}`}
-              >
-                <option value="Assigned">Assigned</option>
-                <option value="Working">Working</option>
-                <option value="Completed">Completed</option>
-              </select>
+              card.terminated || card.approved ? (
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getWorkStatusColor(card.userWorkStatus)}`}>
+                  {card.userWorkStatus || 'Assigned'}
+                </span>
+              ) : (
+                <select
+                  value={card.userWorkStatus || 'Assigned'}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onUpdateWorkStatus(card.id, e.target.value as UserWorkStatus);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`px-2 py-1 rounded-full text-xs font-medium border-none outline-none cursor-pointer ${getWorkStatusColor(card.userWorkStatus)}`}
+                >
+                  <option value="Assigned">Assigned</option>
+                  <option value="Working">Working</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              )
             )}
           </div>
         </div>
-        {userRole === 'admin' && (
-          <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onClick();
-              }}
-              className="p-1 hover:bg-gray-100 rounded transition-colors"
-            >
-              <Edit2 className="w-3.5 h-3.5 text-gray-500" />
-            </button>
+        <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onClick(); // Opens the modal
+            }}
+            className="p-1 hover:bg-gray-100 rounded transition-colors"
+          >
+            <Edit2 className="w-3.5 h-3.5 text-gray-500" />
+          </button>
+          {userRole === 'admin' && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -194,8 +239,8 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
             >
               <Trash2 className="w-3.5 h-3.5 text-gray-500" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {latestListRemark ? (
@@ -262,6 +307,8 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
             </button>
           )}
         </div>
+      )}
+        </>
       )}
         </div>
       )}

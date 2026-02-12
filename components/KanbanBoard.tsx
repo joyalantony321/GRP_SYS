@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar } from 'lucide-react';
-import { Card as CardType, ListType, RemarkType, UserWorkStatus } from '@/types';
+import { Card as CardType, ListType, RemarkType, UserWorkStatus, AppUser } from '@/types';
 import KanbanList from './KanbanList';
 import CardModal from './CardModal';
 import { differenceInDays, differenceInWeeks, differenceInMonths, parseISO, format, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks } from 'date-fns';
@@ -16,6 +16,7 @@ interface Props {
 
 type ViewMode = 'kanban' | 'table' | 'gantt';
 type DateFilter = 'all' | 'day' | 'week' | 'month';
+type RemarkFilter = 'all' | 'Active' | 'Pending' | 'Inactive' | 'Terminated' | 'Approved';
 
 export default function KanbanBoard({ cards, setCards, userRole, userName, onAdminSettings }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
@@ -27,19 +28,40 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, onAdm
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [specificDate, setSpecificDate] = useState<string>('');
+  
+  // New filter states
+  const [userFilter, setUserFilter] = useState<string>('all');
+  const [workStatusFilter, setWorkStatusFilter] = useState<string>('all');
+  const [remarkTypeFilter, setRemarkTypeFilter] = useState<RemarkFilter>('all');
+  const [users, setUsers] = useState<AppUser[]>([]);
 
   const lists: ListType[] = ['Quotation', 'Submittal', 'Review', 'LPO'];
+
+  // Load users from localStorage
+  useEffect(() => {
+    const appDataStr = localStorage.getItem('appData');
+    if (appDataStr) {
+      try {
+        const appData = JSON.parse(appDataStr);
+        setUsers(appData.users || []);
+      } catch (error) {
+        console.error('Error loading users:', error);
+      }
+    }
+  }, []);
 
   const filterCardsByDate = (cards: CardType[]) => {
     // If specific date is selected, filter by that date
     if (specificDate) {
       const selectedDate = parseISO(specificDate);
       return cards.filter(card => {
-        // Exclude completed cards from appearing in future days
-        if (card.userWorkStatus === 'Completed') {
-          return false;
-        }
         const cardDate = parseISO(card.date);
+        
+        // Terminated/Approved cards: only show on their creation date, not future days
+        if (card.terminated || card.approved) {
+          return format(cardDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
+        }
+        
         return format(cardDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd');
       });
     }
@@ -48,12 +70,24 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, onAdm
 
     const now = new Date();
     return cards.filter(card => {
-      // Exclude completed cards from appearing in future days
-      if (card.userWorkStatus === 'Completed') {
-        return false;
+      const cardDate = parseISO(card.date);
+      
+      // Terminated/Approved cards: only show on their creation date when filtering by today
+      if (card.terminated || card.approved) {
+        // Only show if the card date matches today or the date filter period
+        switch (dateFilter) {
+          case 'day':
+            return differenceInDays(now, cardDate) <= 1;
+          case 'week':
+            return differenceInWeeks(now, cardDate) <= 1;
+          case 'month':
+            return differenceInMonths(now, cardDate) <= 1;
+          default:
+            return true;
+        }
       }
 
-      const cardDate = parseISO(card.date);
+      // Regular cards follow normal date filtering
       switch (dateFilter) {
         case 'day':
           return differenceInDays(now, cardDate) <= 1;
@@ -72,7 +106,68 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, onAdm
 
     // Filter by user assignment (regular users only see their assigned cards)
     if (userRole === 'user') {
-      filtered = filtered.filter(card => card.assignedTo === userName);
+      // Users see cards from when assigned until reassigned or terminated/approved
+      filtered = filtered.filter(card => {
+        // Must be assigned to this user
+        if (card.assignedTo !== userName) return false;
+        
+        // Show the card regardless of date/remarks if assigned and active
+        return true;
+      });
+      
+      // Apply date filtering for terminated/approved cards only
+      const now = new Date();
+      filtered = filtered.filter(card => {
+        // If terminated or approved, only show on the same day (don't carry forward)
+        if (card.terminated || card.approved) {
+          const cardDate = parseISO(card.date);
+          // Show only if within today (or current date filter)
+          if (dateFilter === 'day') {
+            return differenceInDays(now, cardDate) <= 1;
+          } else if (specificDate) {
+            return format(cardDate, 'yyyy-MM-dd') === format(parseISO(specificDate), 'yyyy-MM-dd');
+          }
+          // For other filters, show if within the date range
+          return format(cardDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+        }
+        // Active cards (not terminated/approved) always show
+        return true;
+      });
+    } else {
+      // Admin filtering - apply date filter
+      filtered = filterCardsByDate(filtered);
+    }
+
+    // Apply user filter (admin only)
+    if (userRole === 'admin' && userFilter !== 'all') {
+      if (userFilter === 'unassigned') {
+        filtered = filtered.filter(card => !card.assignedTo);
+      } else {
+        filtered = filtered.filter(card => card.assignedTo === userFilter);
+      }
+    }
+
+    // Apply work status filter
+    if (workStatusFilter !== 'all') {
+      filtered = filtered.filter(card => card.userWorkStatus === workStatusFilter);
+    }
+
+    // Apply remark type filter
+    if (remarkTypeFilter !== 'all') {
+      if (remarkTypeFilter === 'Terminated') {
+        filtered = filtered.filter(card => card.terminated);
+      } else if (remarkTypeFilter === 'Approved') {
+        filtered = filtered.filter(card => card.approved);
+      } else {
+        // For Active/Pending/Inactive, exclude terminated and approved cards
+        filtered = filtered.filter(card => {
+          // Exclude terminated or approved cards
+          if (card.terminated || card.approved) return false;
+          
+          const latestRemark = card.remarks.length > 0 ? card.remarks[card.remarks.length - 1] : null;
+          return latestRemark?.type === remarkTypeFilter;
+        });
+      }
     }
 
     if (quoteSearch) {
@@ -81,10 +176,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, onAdm
       );
     }
 
-    filtered = filterCardsByDate(filtered);
-
     return filtered;
-  }, [cards, quoteSearch, dateFilter, specificDate, userRole, userName]);
+  }, [cards, quoteSearch, dateFilter, specificDate, userRole, userName, userFilter, workStatusFilter, remarkTypeFilter]);
 
   const handleUpdateCard = (updatedCard: CardType) => {
     const updatedCards = cards.map(card =>
@@ -358,6 +451,50 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, onAdm
                 <BarChart3 className="w-4 h-4" />
                 <span>Gantt</span>
               </button>
+            </div>
+
+            {/* Filter Controls */}
+            <div className="flex items-center gap-2">
+              {/* User Filter (Admin only) */}
+              {userRole === 'admin' && (
+                <select
+                  value={userFilter}
+                  onChange={(e) => setUserFilter(e.target.value)}
+                  className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                >
+                  <option value="all">All Users</option>
+                  <option value="unassigned">Unassigned</option>
+                  {users.map(user => (
+                    <option key={user.name} value={user.name}>{user.name}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* Work Status Filter */}
+              <select
+                value={workStatusFilter}
+                onChange={(e) => setWorkStatusFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="all">All Status</option>
+                <option value="Assigned">Assigned</option>
+                <option value="Working">Working</option>
+                <option value="Completed">Completed</option>
+              </select>
+
+              {/* Remark Type Filter */}
+              <select
+                value={remarkTypeFilter}
+                onChange={(e) => setRemarkTypeFilter(e.target.value as RemarkFilter)}
+                className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="all">All</option>
+                <option value="Active">Active</option>
+                <option value="Pending">Pending</option>
+                <option value="Inactive">Inactive</option>
+                <option value="Terminated">Terminated</option>
+                <option value="Approved">Approved</option>
+              </select>
             </div>
           </div>
         </div>
