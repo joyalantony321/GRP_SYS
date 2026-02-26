@@ -1,0 +1,68 @@
+version: "3.3"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: grp_sys_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: RdDpp2M47i
+      POSTGRES_DB: GRP_SYS
+    volumes:
+      - grp_sys_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"          # 5433 on host to avoid clash with existing quotation DB on 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d GRP_SYS"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────
+  backend:
+    build: ./server
+    container_name: grp_sys_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:RdDpp2M47i@postgres:5432/GRP_SYS
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
+      UPLOADS_PATH: /app/uploads
+      # Prevent threading issues in Docker
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONHASHSEED: "0"
+    ports:
+      - "8001:8000"          # 8001 on host to avoid clash with existing backend on 8000
+    volumes:
+      - grp_sys_uploads:/app/uploads
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./client
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+    container_name: grp_sys_frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8001/ws}
+      FASTAPI_URL: http://backend:8000
+    ports:
+      - "3001:3000"          # 3001 on host to avoid clash with existing frontend on 3000
+
+volumes:
+  grp_sys_postgres_data:
+  grp_sys_uploads:

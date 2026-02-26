@@ -1,5 +1,28 @@
+# Node
 node_modules/
-.env
 .next/
-dist/
-build/
+
+# Python
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env
+.env
+.env.*
+
+# VSCode
+.vscode/
+
+# Build
+/dist/
+/build/
+
+# Misc
+*.pyc
+__pycache__/

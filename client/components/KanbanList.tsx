@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, MoreHorizontal, Filter } from 'lucide-react';
-import { Card as CardType, ListType, RemarkType, UserWorkStatus } from '@/types';
+import { Card as CardType, ListType, RemarkType, UserWorkStatus, Department } from '@/types';
 import KanbanCard from './KanbanCard';
 import { Droppable } from '@hello-pangea/dnd';
 
@@ -13,9 +13,13 @@ interface Props {
   onApproveCard?: (cardId: string) => void;
   onTerminateCard?: (cardId: string) => void;
   onUnterminateCard?: (cardId: string) => void;
+  onCompleteCard?: (cardId: string) => void;
+  onReviseCard?: (cardId: string) => void;
+  onUpdateCard?: (card: CardType) => void;
   onAssignUser?: (cardId: string, userName: string | undefined) => void;
   onUpdateWorkStatus?: (cardId: string, status: UserWorkStatus) => void;
   userRole: 'admin' | 'user';
+  userDepartment?: Department | '';
 }
 
 export default function KanbanList({
@@ -27,9 +31,13 @@ export default function KanbanList({
   onApproveCard,
   onTerminateCard,
   onUnterminateCard,
+  onCompleteCard,
+  onReviseCard,
+  onUpdateCard,
   onAssignUser,
   onUpdateWorkStatus,
   userRole,
+  userDepartment,
 }: Props) {
   const [statusFilter, setStatusFilter] = useState<RemarkType | 'all'>('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -99,7 +107,7 @@ export default function KanbanList({
   }, [cards, list]);
 
   return (
-    <div className="flex flex-col flex-1 min-w-[320px] max-w-[400px] bg-white rounded-xl shadow-sm border border-gray-200">
+    <div className="flex flex-col flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-gray-200">
       <div className="p-4 border-b border-gray-200">
         <div className={`flex items-center justify-between ${userRole === 'admin' ? 'mb-3' : ''}`}>
           <div className="flex items-center gap-3">
@@ -210,9 +218,13 @@ export default function KanbanList({
                   onApprove={onApproveCard}
                   onTerminate={onTerminateCard}
                   onUnterminate={onUnterminateCard}
+                  onComplete={onCompleteCard}
+                  onRevise={onReviseCard}
+                  onUpdateCard={onUpdateCard}
                   onAssignUser={onAssignUser}
                   onUpdateWorkStatus={onUpdateWorkStatus}
                   userRole={userRole}
+                  userDepartment={userDepartment}
                   currentList={list}
                 />
               ))

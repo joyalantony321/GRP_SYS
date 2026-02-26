@@ -1,40 +1,43 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { Lock, ChevronDown } from 'lucide-react';
-import appData from '@/data/app-data.json';
-import { AppUser } from '@/types';
+import { Lock, ChevronDown, Building2 } from 'lucide-react';
+import { getAppData, ApiUser } from '@/lib/api';
+import { AppUser, Department, DEPARTMENTS } from '@/types';
 
 export default function Login() {
   const router = useRouter();
   const [users, setUsers] = useState<AppUser[]>([]);
+  /** Parallel list kept in sync with `users`; stores the full API response for lookup at login. */
+  const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
+  const [adminPin, setAdminPin] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState<Department | ''>('');
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [pinInput, setPinInput] = useState<string[]>(['', '', '', '']);
   const [pinError, setPinError] = useState('');
   const [showAdminPinScreen, setShowAdminPinScreen] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load users from localStorage appData
-    const storedAppData = localStorage.getItem('appData');
-    if (storedAppData) {
-      try {
-        const appData = JSON.parse(storedAppData);
-        setUsers(appData.users || []);
-      } catch (error) {
-        console.error('Error loading users:', error);
-        // Fallback to imported data
-        setUsers((appData.users as AppUser[]) || []);
-      }
-    } else {
-      // Initialize with default users from JSON file
-      const initialAppData = {
-        adminPin: appData.adminPin,
-        users: appData.users
-      };
-      localStorage.setItem('appData', JSON.stringify(initialAppData));
-      setUsers((appData.users as AppUser[]) || []);
-    }
+    getAppData()
+      .then(data => {
+        setAdminPin(data.adminPin);
+        setApiUsers(data.users);
+        // Map backend ApiUser → frontend AppUser
+        const mapped: AppUser[] = data.users.map(u => ({
+          name:       u.username,
+          pin:        u.pin,
+          department: (u.depName as Department) ?? undefined,
+        }));
+        setUsers(mapped);
+      })
+      .catch(err => console.error('Failed to load app data:', err))
+      .finally(() => setLoading(false));
   }, []);
+
+  const filteredUsers = selectedDepartment
+    ? users.filter(u => u.department === selectedDepartment)
+    : users;
 
   const handleAdminClick = () => {
     setIsAdmin(true);
@@ -82,9 +85,11 @@ export default function Login() {
     }
 
     if (isAdmin) {
-      if (enteredPin === appData.adminPin) {
+      if (enteredPin === adminPin) {
         localStorage.setItem('userRole', 'admin');
         localStorage.setItem('userName', 'Admin');
+        localStorage.setItem('userDepartment', '');
+        localStorage.removeItem('userId');
         router.push('/kanban');
       } else {
         setPinError('Invalid Admin PIN');
@@ -93,9 +98,12 @@ export default function Login() {
       }
     } else {
       const user = users.find(u => u.name === selectedUser);
-      if (user && enteredPin === user.pin) {
+      const apiUser = apiUsers.find(u => u.username === selectedUser);
+      if (user && apiUser && enteredPin === user.pin) {
         localStorage.setItem('userRole', 'user');
         localStorage.setItem('userName', user.name);
+        localStorage.setItem('userDepartment', user.department || '');
+        localStorage.setItem('userId', String(apiUser.userId));
         router.push('/kanban');
       } else {
         setPinError('Invalid PIN');
@@ -113,6 +121,14 @@ export default function Login() {
   };
 
   // Admin PIN Screen
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50">
+        <p className="text-gray-500 text-sm">Loading…</p>
+      </div>
+    );
+  }
+
   if (showAdminPinScreen) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-purple-50">
@@ -196,6 +212,27 @@ export default function Login() {
           <p className="text-sm text-gray-500">Select a user and enter your 4-digit PIN</p>
         </div>
 
+        {/* Department Dropdown */}
+        <div className="mb-4">
+          <div className="relative">
+            <select
+              value={selectedDepartment}
+              onChange={(e) => {
+                setSelectedDepartment(e.target.value as Department | '');
+                setSelectedUser('');
+                setPinError('');
+              }}
+              className="w-full px-4 py-3 text-sm bg-gray-50 border-2 border-gray-200 rounded-xl appearance-none cursor-pointer focus:outline-none focus:border-pink-400 transition-colors text-gray-700"
+            >
+              <option value="">All Departments</option>
+              {DEPARTMENTS.map((dep) => (
+                <option key={dep} value={dep}>{dep}</option>
+              ))}
+            </select>
+            <Building2 className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+          </div>
+        </div>
+
         {/* User Dropdown */}
         <div className="mb-6">
           <div className="relative">
@@ -208,7 +245,7 @@ export default function Login() {
               className="w-full px-4 py-3 text-sm bg-gray-50 border-2 border-gray-200 rounded-xl appearance-none cursor-pointer focus:outline-none focus:border-pink-400 transition-colors text-gray-700"
             >
               <option value="">Select User</option>
-              {users.map((user, index) => (
+              {filteredUsers.map((user, index) => (
                 <option key={index} value={user.name}>
                   {user.name}
                 </option>
@@ -284,7 +321,7 @@ export default function Login() {
             onClick={handleAdminClick}
             className="text-gray-400 hover:text-pink-600 transition-colors text-sm font-medium"
           >
-            admin
+            Admin
           </button>
         </div>
       </div>
