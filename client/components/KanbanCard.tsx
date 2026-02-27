@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText } from 'lucide-react';
+import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Download } from 'lucide-react';
 import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, getDepartmentsForList } from '@/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Draggable } from '@hello-pangea/dnd';
 import { docUrl, getAppData } from '@/lib/api';
+import { exportOrderConfirmationPdf } from '@/lib/fillOrderConfirmationPdf';
 
 interface Props {
   card: Card;
@@ -27,6 +28,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [assignDeptFilter, setAssignDeptFilter] = useState<Department | ''>('');
   const [isExpanded, setIsExpanded] = useState(false); // Both admin and user cards start collapsed
+  const [isExporting, setIsExporting] = useState(false);
 
   // Compute departments and users available for assignment
   const cardChannel = card.channel as ChannelType | undefined;
@@ -361,6 +363,34 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               />
             </label>
           ) : null}
+        </div>
+      )}
+
+      {/* Export Order Confirmation PDF – visible to all roles on WO channel cards */}
+      {isWOList && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (!card.orderConfirmationDetails) {
+                alert('No Order Confirmation data saved for this card yet. Please fill the Order Confirmation form first.');
+                return;
+              }
+              setIsExporting(true);
+              try {
+                await exportOrderConfirmationPdf(card);
+              } catch (err) {
+                alert(`Export failed: ${(err as Error).message}`);
+              } finally {
+                setIsExporting(false);
+              }
+            }}
+            disabled={isExporting}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-300 text-white rounded text-xs font-medium transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {isExporting ? 'Exporting…' : 'Export Order Confirmation'}
+          </button>
         </div>
       )}
 

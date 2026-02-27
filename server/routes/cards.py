@@ -41,6 +41,48 @@ class ListHistoryIn(BaseModel):
     entered_at: Optional[str] = None
 
 
+class OrderConfirmationIn(BaseModel):
+    lpo_no: Optional[str] = None
+    qtn_no: Optional[str] = None
+    date: Optional[str] = None
+    tank_brand_size_type_value: Optional[str] = None
+    payment_terms_confirmed: Optional[str] = None
+    other_terms_condition: Optional[str] = None
+    penalty_conditions_note: Optional[str] = None
+    advance_percent: Optional[str] = None
+    advance_cdc: bool = False
+    advance_pdc: bool = False
+    payment_collection_from_site: bool = False
+    payment_collection_from_office: bool = False
+    delivery_percent: Optional[str] = None
+    delivery_cdc: bool = False
+    delivery_pdc: bool = False
+    delivery_before: bool = False
+    delivery_after: bool = False
+    security_cheque_required: Optional[str] = None
+    when_recollect: Optional[str] = None
+    work_in_progress_percent: Optional[str] = None
+    completion_amount: Optional[str] = None
+    completion_cdc: bool = False
+    completion_pdc: bool = False
+    testing_commissioning_amount: Optional[str] = None
+    testing_commissioning_cdc: bool = False
+    testing_commissioning_pdc: bool = False
+    retention_amount: Optional[str] = None
+    retention_cdc: bool = False
+    retention_pdc: bool = False
+    other_committed_terms: Optional[str] = None
+    accounts_name: Optional[str] = None
+    accounts_email: Optional[str] = None
+    accounts_tel_mob: Optional[str] = None
+    invoice_submission_office: bool = False
+    invoice_submission_site: bool = False
+    warranty_manual_submission_time: Optional[str] = None
+    project_name: Optional[str] = None
+    project_email: Optional[str] = None
+    project_tel_mob: Optional[str] = None
+
+
 class CardIn(BaseModel):
     id: Optional[str] = None
     quote_number: Optional[str] = None
@@ -66,6 +108,7 @@ class CardIn(BaseModel):
     completion_doc_url: Optional[str] = None
     remarks: List[RemarkIn] = []
     list_history: List[ListHistoryIn] = []
+    order_confirmation_details: Optional[OrderConfirmationIn] = None
 
 
 # ── Lookup helpers ───────────────────────────────────────────────────────────
@@ -94,6 +137,51 @@ def _resolve_user_id(db: Session, username: Optional[str]) -> Optional[int]:
 
 
 # ── Output helpers ───────────────────────────────────────────────────────────
+
+def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
+    if not oc:
+        return None
+    return {
+        "lpoNo":                        oc.lpo_no,
+        "qtnNo":                        oc.qtn_no,
+        "date":                         oc.date.isoformat() if oc.date else None,
+        "tankBrandSizeTypeValue":        oc.tank_brand_size_type_value,
+        "paymentTermsConfirmed":         oc.payment_terms_confirmed,
+        "otherTermsCondition":           oc.other_terms_condition,
+        "penaltyConditionsNote":         oc.penalty_conditions_note,
+        "advancePercent":                oc.advance_percent,
+        "advanceCDC":                    oc.advance_cdc,
+        "advancePDC":                    oc.advance_pdc,
+        "paymentCollectionFromSite":     oc.payment_collection_from_site,
+        "paymentCollectionFromOffice":   oc.payment_collection_from_office,
+        "deliveryPercent":               oc.delivery_percent,
+        "deliveryCDC":                   oc.delivery_cdc,
+        "deliveryPDC":                   oc.delivery_pdc,
+        "deliveryBefore":                oc.delivery_before,
+        "deliveryAfter":                 oc.delivery_after,
+        "securityChequeRequired":        oc.security_cheque_required,
+        "whenRecollect":                 oc.when_recollect,
+        "workInProgressPercent":         oc.work_in_progress_percent,
+        "completionAmount":              oc.completion_amount,
+        "completionCDC":                 oc.completion_cdc,
+        "completionPDC":                 oc.completion_pdc,
+        "testingCommissioningAmount":    oc.testing_commissioning_amount,
+        "testingCommissioningCDC":       oc.testing_commissioning_cdc,
+        "testingCommissioningPDC":       oc.testing_commissioning_pdc,
+        "retentionAmount":               oc.retention_amount,
+        "retentionCDC":                  oc.retention_cdc,
+        "retentionPDC":                  oc.retention_pdc,
+        "otherCommittedTerms":           oc.other_committed_terms,
+        "accountsName":                  oc.accounts_name,
+        "accountsEmail":                 oc.accounts_email,
+        "accountsTelMob":                oc.accounts_tel_mob,
+        "invoiceSubmissionOffice":       oc.invoice_submission_office,
+        "invoiceSubmissionSite":         oc.invoice_submission_site,
+        "warrantyManualSubmissionTime":  oc.warranty_manual_submission_time,
+        "projectName":                   oc.project_name,
+        "projectEmail":                  oc.project_email,
+        "projectTelMob":                 oc.project_tel_mob,
+    }
 
 def _card_to_dict(card: Card) -> dict:
     return {
@@ -124,6 +212,7 @@ def _card_to_dict(card: Card) -> dict:
         "completionDocUrl":     card.completion_doc_url,
         "createdAt":            card.created_at.isoformat() if card.created_at else None,
         "updatedAt":            card.updated_at.isoformat() if card.updated_at else None,
+        "orderConfirmationDetails": _oc_to_dict(card.order_confirmation),
         "remarks": [
             {
                 "id":            r.id,
@@ -357,6 +446,100 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
                     created_by_name=r.created_by_username if r_uid is None else None,
                     visible_dep_ids=r.visible_dep_ids or None,
                 ))
+
+    # ── Order Confirmation Details: upsert ───────────────────────────────────
+    oc_in = card_in.order_confirmation_details
+    if oc_in is not None:
+        oc_date = None
+        if oc_in.date:
+            try:
+                oc_date = date_type.fromisoformat(oc_in.date)
+            except (ValueError, TypeError):
+                pass
+        existing_oc = db.query(OrderConfirmationDetails).filter_by(card_id=card.id).first()
+        if existing_oc:
+            existing_oc.lpo_no                          = oc_in.lpo_no
+            existing_oc.qtn_no                          = oc_in.qtn_no
+            existing_oc.date                            = oc_date
+            existing_oc.tank_brand_size_type_value      = oc_in.tank_brand_size_type_value
+            existing_oc.payment_terms_confirmed         = oc_in.payment_terms_confirmed
+            existing_oc.other_terms_condition           = oc_in.other_terms_condition
+            existing_oc.penalty_conditions_note         = oc_in.penalty_conditions_note
+            existing_oc.advance_percent                 = oc_in.advance_percent
+            existing_oc.advance_cdc                     = oc_in.advance_cdc
+            existing_oc.advance_pdc                     = oc_in.advance_pdc
+            existing_oc.payment_collection_from_site    = oc_in.payment_collection_from_site
+            existing_oc.payment_collection_from_office  = oc_in.payment_collection_from_office
+            existing_oc.delivery_percent                = oc_in.delivery_percent
+            existing_oc.delivery_cdc                    = oc_in.delivery_cdc
+            existing_oc.delivery_pdc                    = oc_in.delivery_pdc
+            existing_oc.delivery_before                 = oc_in.delivery_before
+            existing_oc.delivery_after                  = oc_in.delivery_after
+            existing_oc.security_cheque_required        = oc_in.security_cheque_required
+            existing_oc.when_recollect                  = oc_in.when_recollect
+            existing_oc.work_in_progress_percent        = oc_in.work_in_progress_percent
+            existing_oc.completion_amount               = oc_in.completion_amount
+            existing_oc.completion_cdc                  = oc_in.completion_cdc
+            existing_oc.completion_pdc                  = oc_in.completion_pdc
+            existing_oc.testing_commissioning_amount    = oc_in.testing_commissioning_amount
+            existing_oc.testing_commissioning_cdc       = oc_in.testing_commissioning_cdc
+            existing_oc.testing_commissioning_pdc       = oc_in.testing_commissioning_pdc
+            existing_oc.retention_amount                = oc_in.retention_amount
+            existing_oc.retention_cdc                   = oc_in.retention_cdc
+            existing_oc.retention_pdc                   = oc_in.retention_pdc
+            existing_oc.other_committed_terms           = oc_in.other_committed_terms
+            existing_oc.accounts_name                   = oc_in.accounts_name
+            existing_oc.accounts_email                  = oc_in.accounts_email
+            existing_oc.accounts_tel_mob                = oc_in.accounts_tel_mob
+            existing_oc.invoice_submission_office       = oc_in.invoice_submission_office
+            existing_oc.invoice_submission_site         = oc_in.invoice_submission_site
+            existing_oc.warranty_manual_submission_time = oc_in.warranty_manual_submission_time
+            existing_oc.project_name                    = oc_in.project_name
+            existing_oc.project_email                   = oc_in.project_email
+            existing_oc.project_tel_mob                 = oc_in.project_tel_mob
+        else:
+            db.add(OrderConfirmationDetails(
+                card_id=card.id,
+                lpo_no=oc_in.lpo_no,
+                qtn_no=oc_in.qtn_no,
+                date=oc_date,
+                tank_brand_size_type_value=oc_in.tank_brand_size_type_value,
+                payment_terms_confirmed=oc_in.payment_terms_confirmed,
+                other_terms_condition=oc_in.other_terms_condition,
+                penalty_conditions_note=oc_in.penalty_conditions_note,
+                advance_percent=oc_in.advance_percent,
+                advance_cdc=oc_in.advance_cdc,
+                advance_pdc=oc_in.advance_pdc,
+                payment_collection_from_site=oc_in.payment_collection_from_site,
+                payment_collection_from_office=oc_in.payment_collection_from_office,
+                delivery_percent=oc_in.delivery_percent,
+                delivery_cdc=oc_in.delivery_cdc,
+                delivery_pdc=oc_in.delivery_pdc,
+                delivery_before=oc_in.delivery_before,
+                delivery_after=oc_in.delivery_after,
+                security_cheque_required=oc_in.security_cheque_required,
+                when_recollect=oc_in.when_recollect,
+                work_in_progress_percent=oc_in.work_in_progress_percent,
+                completion_amount=oc_in.completion_amount,
+                completion_cdc=oc_in.completion_cdc,
+                completion_pdc=oc_in.completion_pdc,
+                testing_commissioning_amount=oc_in.testing_commissioning_amount,
+                testing_commissioning_cdc=oc_in.testing_commissioning_cdc,
+                testing_commissioning_pdc=oc_in.testing_commissioning_pdc,
+                retention_amount=oc_in.retention_amount,
+                retention_cdc=oc_in.retention_cdc,
+                retention_pdc=oc_in.retention_pdc,
+                other_committed_terms=oc_in.other_committed_terms,
+                accounts_name=oc_in.accounts_name,
+                accounts_email=oc_in.accounts_email,
+                accounts_tel_mob=oc_in.accounts_tel_mob,
+                invoice_submission_office=oc_in.invoice_submission_office,
+                invoice_submission_site=oc_in.invoice_submission_site,
+                warranty_manual_submission_time=oc_in.warranty_manual_submission_time,
+                project_name=oc_in.project_name,
+                project_email=oc_in.project_email,
+                project_tel_mob=oc_in.project_tel_mob,
+            ))
 
     _write_audit(db, card_in.channel_name,
                  "card_created" if is_new else "card_updated",
