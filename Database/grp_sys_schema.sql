@@ -287,6 +287,10 @@ CREATE TABLE order_confirmation_details (
     project_email                   VARCHAR(255),
     project_tel_mob                 VARCHAR(50),
 
+    -- Signatories
+    sales_executive_name            VARCHAR(255),
+    manager_name                    VARCHAR(255),
+
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

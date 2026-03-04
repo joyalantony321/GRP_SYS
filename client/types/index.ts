@@ -222,6 +222,9 @@ export interface OrderConfirmationFormData {
   projectName: string;
   projectEmail: string;
   projectTelMob: string;
+  // Signatories
+  salesExecutiveName: string;
+  managerName: string;
 }
 
 export const defaultOrderConfirmationForm = (): OrderConfirmationFormData => ({
@@ -264,6 +267,8 @@ export const defaultOrderConfirmationForm = (): OrderConfirmationFormData => ({
   projectName: '',
   projectEmail: '',
   projectTelMob: '',
+  salesExecutiveName: '',
+  managerName: '',
 });
 
 export interface KanbanData {

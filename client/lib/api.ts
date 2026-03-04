@@ -183,6 +183,8 @@ export function mapCard(c: Record<string, unknown>): Card {
         projectName:                    (oc.projectName as string) ?? '',
         projectEmail:                   (oc.projectEmail as string) ?? '',
         projectTelMob:                  (oc.projectTelMob as string) ?? '',
+        salesExecutiveName:             (oc.salesExecutiveName as string) ?? '',
+        managerName:                    (oc.managerName as string) ?? '',
       };
     })(),
     workOrderDetails: (c.workOrderDetails as Card['workOrderDetails']) ?? undefined,
@@ -268,6 +270,8 @@ function toCardIn(card: Card, performedBy?: number) {
       project_name:                    oc.projectName || null,
       project_email:                   oc.projectEmail || null,
       project_tel_mob:                 oc.projectTelMob || null,
+      sales_executive_name:            oc.salesExecutiveName || null,
+      manager_name:                    oc.managerName || null,
     } : null,
     ...(performedBy !== undefined ? { performed_by: performedBy } : {}),
   };

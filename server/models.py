@@ -261,6 +261,8 @@ class OrderConfirmationDetails(Base):
     project_name                    = Column(String(255), nullable=True)
     project_email                   = Column(String(255), nullable=True)
     project_tel_mob                 = Column(String(50), nullable=True)
+    sales_executive_name            = Column(String(255), nullable=True)
+    manager_name                    = Column(String(255), nullable=True)
     created_at                      = Column(DateTime(timezone=True), server_default=func.now())
     updated_at                      = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

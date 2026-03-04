@@ -278,6 +278,21 @@ export default function OrderConfirmationModal({ workOrder, existing, canEdit, o
             </div>
           </div>
 
+          {/* ── Signatories ── */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-3">
+            <SectionTitle>Above Details Are Confirmed By</SectionTitle>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Sales Executive</label>
+                <input type="text" disabled={disabled} value={form.salesExecutiveName} onChange={(e) => set('salesExecutiveName', e.target.value)} placeholder="Sales Executive Name" className={inputCls(disabled)} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Manager</label>
+                <input type="text" disabled={disabled} value={form.managerName} onChange={(e) => set('managerName', e.target.value)} placeholder="Manager Name" className={inputCls(disabled)} />
+              </div>
+            </div>
+          </div>
+
         </div>
 
         {/* Footer */}

@@ -81,6 +81,8 @@ class OrderConfirmationIn(BaseModel):
     project_name: Optional[str] = None
     project_email: Optional[str] = None
     project_tel_mob: Optional[str] = None
+    sales_executive_name: Optional[str] = None
+    manager_name: Optional[str] = None
 
 
 class CardIn(BaseModel):
@@ -181,6 +183,8 @@ def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
         "projectName":                   oc.project_name,
         "projectEmail":                  oc.project_email,
         "projectTelMob":                 oc.project_tel_mob,
+        "salesExecutiveName":            oc.sales_executive_name,
+        "managerName":                   oc.manager_name,
     }
 
 def _card_to_dict(card: Card) -> dict:
@@ -497,6 +501,8 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
             existing_oc.project_name                    = oc_in.project_name
             existing_oc.project_email                   = oc_in.project_email
             existing_oc.project_tel_mob                 = oc_in.project_tel_mob
+            existing_oc.sales_executive_name            = oc_in.sales_executive_name
+            existing_oc.manager_name                    = oc_in.manager_name
         else:
             db.add(OrderConfirmationDetails(
                 card_id=card.id,
@@ -539,6 +545,8 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
                 project_name=oc_in.project_name,
                 project_email=oc_in.project_email,
                 project_tel_mob=oc_in.project_tel_mob,
+                sales_executive_name=oc_in.sales_executive_name,
+                manager_name=oc_in.manager_name,
             ))
 
     _write_audit(db, card_in.channel_name,
