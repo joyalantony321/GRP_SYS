@@ -67,8 +67,8 @@ def get_app_data(db: Session = Depends(get_db)):
     users   = db.query(User).filter(User.is_deleted == False).all()   # noqa: E712
     deleted = db.query(User).filter(User.is_deleted == True).all()   # noqa: E712
     depts   = db.query(Department).all()
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "admin_pin").first()
-    admin_pin = pin_row.value if pin_row else "9656"
+    # Temporarily use a hard-coded admin PIN. Change this later as needed.
+    admin_pin = "9656"
     return {
         "adminPin":    admin_pin,
         "users":       [_user_to_dict(u) for u in users],
