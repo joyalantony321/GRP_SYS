@@ -9,7 +9,10 @@ export default function Login() {
   const [users, setUsers] = useState<AppUser[]>([]);
   /** Parallel list kept in sync with `users`; stores the full API response for lookup at login. */
   const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
-  const [adminPin, setAdminPin] = useState('');
+  // Default to the temporary admin PIN so admin login works even if the API
+  // or database doesn't return a value yet. Change later when you want
+  // dynamic admin PINs.
+  const [adminPin, setAdminPin] = useState('9656');
   const [selectedDepartment, setSelectedDepartment] = useState<Department | ''>('');
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -21,7 +24,8 @@ export default function Login() {
   useEffect(() => {
     getAppData()
       .then(data => {
-        setAdminPin(data.adminPin);
+        // Only overwrite the default if the API returns a non-empty value.
+        if (data.adminPin) setAdminPin(data.adminPin);
         setApiUsers(data.users);
         // Map backend ApiUser → frontend AppUser
         const mapped: AppUser[] = data.users.map(u => ({
