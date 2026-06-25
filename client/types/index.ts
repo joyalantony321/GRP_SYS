@@ -6,7 +6,7 @@ export type ListType =
 
 export type UserWorkStatus = 'Assigned' | 'Working' | 'Completed';
 
-export type ChannelType = 'Quotation' | 'Work Order';
+export type ChannelType = 'Quotation' | 'Work Order' | 'Schedule';
 
 export type Department = 'Quotation' | 'Technical' | 'Accounts' | 'Delivery & Installation';
 
@@ -15,11 +15,13 @@ export const DEPARTMENTS: Department[] = ['Quotation', 'Technical', 'Accounts', 
 export const CHANNEL_LISTS: Record<ChannelType, ListType[]> = {
   'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
   'Work Order': ['Work Order', 'Accounts', 'Delivery', 'Installation'],
+  'Schedule': [],
 };
 
 export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
   'Quotation': ['Quotation', 'Technical'],
   'Work Order': ['Accounts', 'Technical', 'Delivery & Installation'],
+  'Schedule': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
 };
 
 // Per-department list permissions per channel.

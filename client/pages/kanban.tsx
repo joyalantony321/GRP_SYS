@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import KanbanBoard from '@/components/KanbanBoard';
+import ScheduleBoard from '@/components/ScheduleBoard';
 import AdminPanel from '@/components/AdminPanel';
 import { Card, ChannelType, Department, CHANNEL_DEPARTMENTS } from '@/types';
 import {
@@ -211,9 +212,9 @@ export default function Kanban() {
 
   // Determine which channels are accessible to the current user
   const accessibleChannels: ChannelType[] = userRole === 'admin'
-    ? ['Quotation', 'Work Order']
-    : (['Quotation', 'Work Order'] as ChannelType[]).filter(ch =>
-        userDepartment ? CHANNEL_DEPARTMENTS[ch].includes(userDepartment as Department) : false
+    ? ['Quotation', 'Work Order', 'Schedule']
+    : (['Quotation', 'Work Order', 'Schedule'] as ChannelType[]).filter(ch =>
+        ch === 'Schedule' ? true : (userDepartment ? CHANNEL_DEPARTMENTS[ch].includes(userDepartment as Department) : false)
       );
 
   if (!userRole) {
@@ -222,42 +223,52 @@ export default function Kanban() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <KanbanBoard
-        cards={cardsByChannel[activeChannel]}
-        setCards={(updated) => {
-          const prev = dedupeCardsById(cardsByChannel[activeChannel]);
-          const nextUpdated = dedupeCardsById(updated);
-          // Optimistic state update
-          setCardsByChannel(p => ({ ...p, [activeChannel]: nextUpdated }));
-          // Detect deletes
-          const prevIds = new Set(prev.map(c => c.id));
-          const newIds  = new Set(nextUpdated.map(c => c.id));
-          prev.forEach(c => {
-            if (!newIds.has(c.id)) {
-              const uid = localStorage.getItem('userId');
-              deleteCard(c.id, uid ? Number(uid) : undefined).catch(console.error);
-            }
-          });
-          // Detect updates (cards present in both lists that changed)
-          nextUpdated.forEach(c => {
-            if (prevIds.has(c.id)) {
-              const old = prev.find(p => p.id === c.id);
-              if (JSON.stringify(old) !== JSON.stringify(c)) {
+      {activeChannel === 'Schedule' ? (
+        <ScheduleBoard
+          userName={userName}
+          userDepartment={userDepartment}
+          userRole={userRole}
+          onChannelSwitch={handleChannelSwitch}
+          accessibleChannels={accessibleChannels}
+        />
+      ) : (
+        <KanbanBoard
+          cards={cardsByChannel[activeChannel]}
+          setCards={(updated) => {
+            const prev = dedupeCardsById(cardsByChannel[activeChannel]);
+            const nextUpdated = dedupeCardsById(updated);
+            // Optimistic state update
+            setCardsByChannel(p => ({ ...p, [activeChannel]: nextUpdated }));
+            // Detect deletes
+            const prevIds = new Set(prev.map(c => c.id));
+            const newIds  = new Set(nextUpdated.map(c => c.id));
+            prev.forEach(c => {
+              if (!newIds.has(c.id)) {
                 const uid = localStorage.getItem('userId');
-                updateCard(c, uid ? Number(uid) : undefined).catch(console.error);
+                deleteCard(c.id, uid ? Number(uid) : undefined).catch(console.error);
               }
-            }
-          });
-        }}
-        userRole={userRole}
-        userName={userName}
-        userDepartment={userDepartment}
-        activeChannel={activeChannel}
-        accessibleChannels={accessibleChannels}
-        onChannelSwitch={handleChannelSwitch}
-        onCreateInChannel={addCardToChannel}
-        onAdminSettings={userRole === 'admin' ? () => setShowAdminPanel(true) : undefined}
-      />
+            });
+            // Detect updates (cards present in both lists that changed)
+            nextUpdated.forEach(c => {
+              if (prevIds.has(c.id)) {
+                const old = prev.find(p => p.id === c.id);
+                if (JSON.stringify(old) !== JSON.stringify(c)) {
+                  const uid = localStorage.getItem('userId');
+                  updateCard(c, uid ? Number(uid) : undefined).catch(console.error);
+                }
+              }
+            });
+          }}
+          userRole={userRole}
+          userName={userName}
+          userDepartment={userDepartment}
+          activeChannel={activeChannel}
+          accessibleChannels={accessibleChannels}
+          onChannelSwitch={handleChannelSwitch}
+          onCreateInChannel={addCardToChannel}
+          onAdminSettings={userRole === 'admin' ? () => setShowAdminPanel(true) : undefined}
+        />
+      )}
 
       {/* Admin Panel Modal */}
       {showAdminPanel && (

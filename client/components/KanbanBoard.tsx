@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar, FileText, ClipboardList, ChevronDown, Check, X, CheckCircle } from 'lucide-react';
+import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar, FileText, ClipboardList, ChevronDown, Check, X, CheckCircle, CalendarRange } from 'lucide-react';
 import { Card as CardType, ListType, RemarkType, UserWorkStatus, AppUser, ChannelType, Department, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists } from '@/types';
 import KanbanList from './KanbanList';
 import CardModal from './CardModal';
@@ -829,7 +829,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                         />
                       </div>
                     </div>
-                    {(['Quotation', 'Work Order'] as ChannelType[]).map(ch => {
+                    {(['Quotation', 'Work Order', 'Schedule'] as ChannelType[]).map(ch => {
                       const accessible = accessibleChannels.includes(ch);
                       return (
                         <button
@@ -841,11 +841,13 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                           } ${!accessible ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                         >
                           <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                            ch === 'Quotation' ? 'bg-blue-100' : 'bg-orange-100'
+                            ch === 'Quotation' ? 'bg-blue-100' : ch === 'Work Order' ? 'bg-orange-100' : 'bg-purple-100'
                           }`}>
                             {ch === 'Quotation'
                               ? <FileText className="w-4 h-4 text-blue-600" />
-                              : <ClipboardList className="w-4 h-4 text-orange-500" />}
+                              : ch === 'Work Order'
+                              ? <ClipboardList className="w-4 h-4 text-orange-500" />
+                              : <CalendarRange className="w-4 h-4 text-purple-600" />}
                           </span>
                           <span className={`flex-1 text-left font-medium ${activeChannel === ch ? 'text-gray-900' : 'text-gray-700'}`}>
                             {ch}
