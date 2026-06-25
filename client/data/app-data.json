@@ -1,15 +1,60 @@
 {
   "adminPin": "9656",
-  "users": [
+  "nextUserId": 5,
+  "departments": [
     {
-      "name": "Midhun Murali",
-      "pin": "1234",
-      "department": "Quotation"
+      "depId": 1,
+      "depName": "Quotation"
     },
     {
-      "name": "Saleesh Antony",
+      "depId": 2,
+      "depName": "Technical"
+    },
+    {
+      "depId": 3,
+      "depName": "Accounts"
+    },
+    {
+      "depId": 4,
+      "depName": "Delivery & Installation"
+    }
+  ],
+  "users": [
+    {
+      "userId": 1,
+      "username": "Midhun Murali",
+      "pin": "1234",
+      "depId": 1,
+      "depName": "Quotation",
+      "isDeleted": false,
+      "deletedAt": null
+    },
+    {
+      "userId": 2,
+      "username": "Saleesh Antony",
       "pin": "5678",
-      "department": "Technical"
+      "depId": 2,
+      "depName": "Technical",
+      "isDeleted": false,
+      "deletedAt": null
+    },
+    {
+      "userId": 3,
+      "username": "joyal",
+      "pin": "9656",
+      "depId": 2,
+      "depName": "Technical",
+      "isDeleted": false,
+      "deletedAt": null
+    },
+    {
+      "userId": 4,
+      "username": "jen",
+      "pin": "1234",
+      "depId": 3,
+      "depName": "Accounts",
+      "isDeleted": false,
+      "deletedAt": null
     }
   ],
   "deletedUsers": []

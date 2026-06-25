@@ -234,8 +234,7 @@ export default function KanbanList({
         )}
       </Droppable>
 
-      {userRole === 'admin' && (
-        <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200">
           <button
             onClick={onAddCard}
             className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors border border-gray-200 hover:border-gray-300"
@@ -244,7 +243,6 @@ export default function KanbanList({
             <span>Add Card</span>
           </button>
         </div>
-      )}
     </div>
   );
 }

@@ -11,6 +11,21 @@ import {
   connectWebSocket,
 } from '@/lib/api';
 
+function upsertCardById(list: Card[], incoming: Card): Card[] {
+  const incomingId = String(incoming.id);
+  const next = list.filter(c => String(c.id) !== incomingId);
+  const idx = list.findIndex(c => String(c.id) === incomingId);
+  if (idx < 0) return [...next, incoming];
+  next.splice(idx, 0, incoming);
+  return next;
+}
+
+function dedupeCardsById(list: Card[]): Card[] {
+  const map = new Map<string, Card>();
+  list.forEach(c => map.set(String(c.id), c));
+  return Array.from(map.values());
+}
+
 export default function Kanban() {
   const router = useRouter();
   const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
@@ -30,7 +45,7 @@ export default function Kanban() {
   const loadChannel = useCallback(async (channel: ChannelType) => {
     try {
       const cards = await fetchCards(channel);
-      setCardsByChannel(prev => ({ ...prev, [channel]: cards }));
+      setCardsByChannel(prev => ({ ...prev, [channel]: dedupeCardsById(cards) }));
     } catch (err) {
       console.error(`Failed to load cards for ${channel}:`, err);
     }
@@ -137,10 +152,7 @@ export default function Kanban() {
                 if (!ch) return;
                 setCardsByChannel(prev => {
                   const list = prev[ch] ?? [];
-                  const exists = list.some(c => c.id === updated.id);
-                  const nextList = exists
-                    ? list.map(c => c.id === updated.id ? updated : c)
-                    : [...list, updated];
+                  const nextList = upsertCardById(list, updated);
                   return { ...prev, [ch]: nextList };
                 });
               });
@@ -178,7 +190,7 @@ export default function Kanban() {
       const created = await createCard({ ...card, channel }, uid);
       setCardsByChannel(prev => ({
         ...prev,
-        [channel]: [...(prev[channel] ?? []), created],
+        [channel]: upsertCardById(prev[channel] ?? [], created),
       }));
       return created;
     } catch (err) {
@@ -187,7 +199,7 @@ export default function Kanban() {
       const fallback = { ...card, channel };
       setCardsByChannel(prev => ({
         ...prev,
-        [channel]: [...(prev[channel] ?? []), fallback],
+        [channel]: upsertCardById(prev[channel] ?? [], fallback),
       }));
       return fallback;
     }
@@ -213,12 +225,13 @@ export default function Kanban() {
       <KanbanBoard
         cards={cardsByChannel[activeChannel]}
         setCards={(updated) => {
-          const prev = cardsByChannel[activeChannel];
+          const prev = dedupeCardsById(cardsByChannel[activeChannel]);
+          const nextUpdated = dedupeCardsById(updated);
           // Optimistic state update
-          setCardsByChannel(p => ({ ...p, [activeChannel]: updated }));
+          setCardsByChannel(p => ({ ...p, [activeChannel]: nextUpdated }));
           // Detect deletes
           const prevIds = new Set(prev.map(c => c.id));
-          const newIds  = new Set(updated.map(c => c.id));
+          const newIds  = new Set(nextUpdated.map(c => c.id));
           prev.forEach(c => {
             if (!newIds.has(c.id)) {
               const uid = localStorage.getItem('userId');
@@ -226,7 +239,7 @@ export default function Kanban() {
             }
           });
           // Detect updates (cards present in both lists that changed)
-          updated.forEach(c => {
+          nextUpdated.forEach(c => {
             if (prevIds.has(c.id)) {
               const old = prev.find(p => p.id === c.id);
               if (JSON.stringify(old) !== JSON.stringify(c)) {

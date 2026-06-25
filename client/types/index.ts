@@ -92,7 +92,9 @@ export interface Card {
   terminated?: boolean;
   assignedTo?: string;
   userWorkStatus?: UserWorkStatus;
+  paymentPercent?: number;
   listHistory?: { list: ListType; enteredAt: string }[];
+  assignmentHistory?: { assignedTo: string; assignedAt: string; assignedBy?: string; action?: 'Sent' | 'Approved' | 'Terminated' | 'Revised' | 'Redo' }[];
   workOrderDetails?: WorkOrderFormData;
   orderConfirmationDetails?: OrderConfirmationFormData;
 }

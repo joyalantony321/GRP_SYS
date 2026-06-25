@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Download } from 'lucide-react';
-import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, getDepartmentsForList } from '@/types';
+import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Download, Send } from 'lucide-react';
+import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, DEPARTMENTS } from '@/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Draggable } from '@hello-pangea/dnd';
 import { docUrl, getAppData } from '@/lib/api';
@@ -27,12 +27,14 @@ interface Props {
 export default function KanbanCard({ card, index, onClick, onDelete, onApprove, onTerminate, onUnterminate, onComplete, onRevise, onUpdateCard, onAssignUser, onUpdateWorkStatus, userRole, userDepartment, currentList }: Props) {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [assignDeptFilter, setAssignDeptFilter] = useState<Department | ''>('');
+  const [pendingAssignee, setPendingAssignee] = useState<string>(card.assignedTo || '');
   const [isExpanded, setIsExpanded] = useState(false); // Both admin and user cards start collapsed
   const [isExporting, setIsExporting] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(false);
+  const [paymentInput, setPaymentInput] = useState<string>(String(card.paymentPercent ?? 0));
 
-  // Compute departments and users available for assignment
-  const cardChannel = card.channel as ChannelType | undefined;
-  const assignableDepts = cardChannel ? getDepartmentsForList(cardChannel, currentList) : [];
+  // All departments are always assignable — any user can send to any dept
+  const assignableDepts: Department[] = DEPARTMENTS;
   const assignableUsers = assignDeptFilter
     ? users.filter(u => u.department === assignDeptFilter)
     : users;
@@ -53,6 +55,32 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   useEffect(() => {
     loadUsers();
   }, []);
+
+  useEffect(() => {
+    setPendingAssignee(card.assignedTo || '');
+  }, [card.assignedTo]);
+
+  useEffect(() => {
+    setPaymentInput(String(card.paymentPercent ?? 0));
+  }, [card.paymentPercent]);
+
+  const isWorkOrderCard = card.channel === 'Work Order';
+  const canViewPayment = isWorkOrderCard && (userRole === 'admin' || userDepartment === 'Accounts');
+  const canAdjustPayment = isWorkOrderCard && userRole === 'user' && userDepartment === 'Accounts';
+  const paymentPercent = Math.max(0, Math.min(100, Number(card.paymentPercent ?? 0)));
+  const paymentHue = Math.round((paymentPercent / 100) * 120); // red(0) -> green(120)
+  const paymentColor = `hsl(${paymentHue} 78% 40%)`;
+  const paymentTrack = `conic-gradient(${paymentColor} ${paymentPercent * 3.6}deg, #e5e7eb ${paymentPercent * 3.6}deg)`;
+
+  const handleSavePayment = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onUpdateCard) return;
+    const parsed = Number(paymentInput);
+    const clamped = Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 0;
+    onUpdateCard({ ...card, paymentPercent: clamped, updatedAt: new Date().toISOString() });
+    setPaymentInput(String(clamped));
+    setEditingPayment(false);
+  };
 
   const getCardColor = () => {
     // Highest-priority overrides
@@ -136,6 +164,12 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
 
   const hasRemarks = card.remarks.filter(r => r.list === currentList).length > 0;
   const latestListRemark = getLatestListRemark();
+  const assignmentTrail = (card.assignmentHistory ?? []).filter((entry, idx, arr) => {
+    if (idx === 0) return true;
+    const prev = arr[idx - 1];
+    return !(prev.assignedTo === entry.assignedTo && prev.assignedBy === entry.assignedBy && prev.assignedAt === entry.assignedAt);
+  });
+  const lastSentBy = assignmentTrail.length > 0 ? (assignmentTrail[assignmentTrail.length - 1].assignedBy || assignmentTrail[assignmentTrail.length - 1].assignedTo) : undefined;
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Toggle expansion state for both admin and user
@@ -146,7 +180,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const bgClass = ''; // bg is always part of cardColorClasses
 
   return (
-    <Draggable draggableId={card.id} index={index} isDragDisabled={userRole !== 'admin'}>
+    <Draggable draggableId={card.id} index={index} isDragDisabled={false}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
@@ -169,10 +203,26 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
             )}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            {userRole === 'admin' && card.assignedTo && (
-              <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                {card.assignedTo}
+            {canViewPayment && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold text-white"
+                style={{ backgroundColor: paymentColor }}
+                title="Payment received"
+              >
+                {paymentPercent}%
               </span>
+            )}
+            {userRole === 'admin' && card.assignedTo && (
+              <div className="flex flex-col items-end leading-tight">
+                <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                  {card.assignedTo}
+                </span>
+                {lastSentBy && (
+                  <span className="mt-0.5 text-[9px] text-gray-400">
+                    by {lastSentBy}
+                  </span>
+                )}
+              </div>
             )}
             {card.userWorkStatus && (
               <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${getWorkStatusColor(card.userWorkStatus)}`}>
@@ -222,7 +272,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
       {/* Assignment / status controls row */}
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
         {getStatusBadge()}
-        {userRole === 'admin' && onAssignUser && (
+        {onAssignUser && (
           <>
             {assignableDepts.length > 0 && (
               <select
@@ -238,11 +288,8 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               </select>
             )}
             <select
-              value={card.assignedTo || ''}
-              onChange={(e) => {
-                e.stopPropagation();
-                onAssignUser(card.id, e.target.value || undefined);
-              }}
+              value={pendingAssignee}
+              onChange={(e) => { e.stopPropagation(); setPendingAssignee(e.target.value); }}
               onClick={(e) => e.stopPropagation()}
               className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded text-xs font-medium outline-none cursor-pointer hover:bg-purple-100 max-w-full"
             >
@@ -251,9 +298,32 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
                 <option key={user.name} value={user.name}>{user.name}</option>
               ))}
             </select>
+            {/* Send button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAssignUser(card.id, pendingAssignee || undefined);
+                setPendingAssignee('');
+                setAssignDeptFilter('');
+              }}
+              className="p-1 bg-indigo-500 hover:bg-indigo-600 text-white rounded transition-colors flex-shrink-0"
+              title="Send card to selected user"
+            >
+              <Send className="w-3 h-3" />
+            </button>
+            {userRole === 'admin' && card.assignedTo && (
+              <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                {card.assignedTo}
+              </span>
+            )}
             {card.assignedTo && card.userWorkStatus && (
               <span className={`px-2 py-0.5 rounded text-xs font-medium border ${getWorkStatusColor(card.userWorkStatus)}`}>
                 {card.userWorkStatus}
+              </span>
+            )}
+            {lastSentBy && (
+              <span className="text-[10px] text-gray-400 ml-1">
+                sent by {lastSentBy}
               </span>
             )}
           </>
@@ -265,22 +335,81 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               {card.userWorkStatus || 'Assigned'}
             </span>
           ) : (
-            <select
-              value={card.userWorkStatus || 'Assigned'}
-              onChange={(e) => {
-                e.stopPropagation();
-                onUpdateWorkStatus(card.id, e.target.value as UserWorkStatus);
-              }}
+            /* Sliding pill toggle: Assigned | Working */
+            <div
+              className="flex items-center bg-gray-100 rounded-full text-xs border border-gray-200 overflow-hidden"
               onClick={(e) => e.stopPropagation()}
-              className={`px-2 py-0.5 rounded text-xs font-medium border outline-none cursor-pointer ${getWorkStatusColor(card.userWorkStatus)}`}
             >
-              <option value="Assigned">Assigned</option>
-              <option value="Working">Working</option>
-              <option value="Completed">Completed</option>
-            </select>
+              <button
+                onClick={(e) => { e.stopPropagation(); onUpdateWorkStatus(card.id, 'Assigned'); }}
+                className={`px-2.5 py-0.5 rounded-full font-medium transition-all ${
+                  (card.userWorkStatus || 'Assigned') !== 'Working'
+                    ? 'bg-blue-500 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Assigned
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onUpdateWorkStatus(card.id, 'Working'); }}
+                className={`px-2.5 py-0.5 rounded-full font-medium transition-all ${
+                  card.userWorkStatus === 'Working'
+                    ? 'bg-orange-500 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Working
+              </button>
+            </div>
           )
         )}
       </div>
+
+      {canViewPayment && (
+        <div className="mb-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-8 h-8 rounded-full" style={{ background: paymentTrack }}>
+            <div className="absolute inset-[3px] rounded-full bg-white flex items-center justify-center">
+              <span className="text-[9px] font-semibold text-gray-700">{paymentPercent}</span>
+            </div>
+          </div>
+          <span className="text-[11px] text-gray-600 font-medium">Payment Received</span>
+
+          {canAdjustPayment && onUpdateCard && !editingPayment && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditingPayment(true); }}
+              className="ml-1 px-2 py-0.5 text-[10px] font-semibold rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+              title="Adjust payment percent"
+            >
+              Adjust %
+            </button>
+          )}
+
+          {canAdjustPayment && onUpdateCard && editingPayment && (
+            <>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={paymentInput}
+                onChange={(e) => setPaymentInput(e.target.value)}
+                className="w-16 px-2 py-0.5 text-[11px] border border-gray-300 rounded"
+              />
+              <button
+                onClick={handleSavePayment}
+                className="px-2 py-0.5 text-[10px] font-semibold rounded border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                Save
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditingPayment(false); setPaymentInput(String(paymentPercent)); }}
+                className="px-2 py-0.5 text-[10px] font-semibold rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {latestListRemark ? (
         <div className="space-y-2 text-xs text-gray-600">
@@ -394,10 +523,10 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
         </div>
       )}
 
-      {/* Admin Action Buttons */}
-      {userRole === 'admin' && (
+      {/* Card Action Buttons */}
+      {(userRole === 'admin' || card.channel === 'Quotation') && (
         <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2 flex-wrap">
-          {currentList === 'LPO' && !card.approved && onApprove && (
+          {card.channel === 'Quotation' && currentList === 'LPO' && !card.approved && onApprove && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -415,7 +544,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               Approve
             </button>
           )}
-          {card.approved && currentList === 'LPO' && (
+          {card.channel === 'Quotation' && card.approved && currentList === 'LPO' && (
             <span className="flex items-center gap-1 px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-medium">
               <CheckCircle className="w-3.5 h-3.5" />
               Approved
@@ -446,7 +575,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               Completed
             </span>
           )}
-          {latestListRemark?.type === 'Inactive' && !card.terminated && onTerminate && (
+          {card.channel === 'Quotation' && latestListRemark?.type === 'Inactive' && !card.terminated && onTerminate && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -458,7 +587,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               Terminate
             </button>
           )}
-          {card.terminated && latestListRemark?.type === 'Inactive' && onUnterminate && (
+          {card.channel === 'Quotation' && card.terminated && latestListRemark?.type === 'Inactive' && onUnterminate && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -483,6 +612,39 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               Revise
             </button>
           )}
+        </div>
+      )}
+
+      {/* Admin Assignment Timeline */}
+      {userRole === 'admin' && (assignmentTrail.length > 0) && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">Assignment Trail</p>
+          <div className="relative pl-3 space-y-1.5 before:absolute before:left-[5px] before:top-0 before:bottom-0 before:w-px before:bg-gray-200">
+            <div className="flex items-center gap-2">
+              <div className="absolute left-0 w-2.5 h-2.5 bg-gray-300 rounded-full border-2 border-white"></div>
+              <span className="text-[10px] text-gray-400 ml-1">Created · {format(new Date(card.createdAt), 'dd/MM/yy HH:mm')}</span>
+            </div>
+            {assignmentTrail.map((h, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="absolute left-0 w-2.5 h-2.5 bg-indigo-400 rounded-full border-2 border-white"></div>
+                <span className="text-[10px] text-gray-600 ml-1">
+                  {h.action ? (
+                    <>
+                      <span className="font-semibold text-indigo-700">{h.action}</span>
+                      {h.assignedBy && <span className="text-gray-400"> by {h.assignedBy}</span>}
+                      {h.assignedTo && <span className="text-gray-400"> · on {h.assignedTo}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-indigo-700">{h.assignedTo}</span>
+                      {h.assignedBy && <span className="text-gray-400"> ← {h.assignedBy}</span>}
+                    </>
+                  )}
+                  <span className="text-gray-400"> · {format(new Date(h.assignedAt), 'dd/MM/yy HH:mm')}</span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
         </>

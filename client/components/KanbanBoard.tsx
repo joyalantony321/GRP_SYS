@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar, FileText, ClipboardList, ChevronDown, Check } from 'lucide-react';
+import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar, FileText, ClipboardList, ChevronDown, Check, X, CheckCircle } from 'lucide-react';
 import { Card as CardType, ListType, RemarkType, UserWorkStatus, AppUser, ChannelType, Department, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists } from '@/types';
 import KanbanList from './KanbanList';
 import CardModal from './CardModal';
@@ -39,9 +39,11 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   const [taskSearch, setTaskSearch] = useState('');
   const [cardSearch, setCardSearch] = useState('');
   const [selectedCard, setSelectedCard] = useState<CardType | null>(null);
+  const [selectedCardIsNew, setSelectedCardIsNew] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
+  const [showApprovedCardsModal, setShowApprovedCardsModal] = useState(false);
   const channelDropdownRef = useRef<HTMLDivElement>(null);
   const dateFilterRef = useRef<HTMLDivElement>(null);
 
@@ -73,8 +75,18 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   const [remarkTypeFilter, setRemarkTypeFilter] = useState<RemarkFilter>('all');
   const [users, setUsers] = useState<AppUser[]>([]);
 
-  // Admin sees all lists; regular users only see their permitted lists
-  const lists: ListType[] = getPermittedLists(activeChannel, userRole, userDepartment);
+  // Admin sees all lists; regular users see their permitted lists PLUS any list
+  // that currently contains a card assigned to them (so sent cards are always visible).
+  const lists: ListType[] = useMemo(() => {
+    const permitted = getPermittedLists(activeChannel, userRole, userDepartment);
+    if (userRole !== 'user') return permitted;
+    const channelLists = CHANNEL_LISTS[activeChannel];
+    const listsWithAssigned = channelLists.filter(l =>
+      cards.some(c => c.list === l && c.assignedTo === userName)
+    );
+    const merged = permitted.concat(listsWithAssigned.filter(l => !permitted.includes(l)));
+    return channelLists.filter(l => merged.includes(l));
+  }, [activeChannel, userRole, userDepartment, userName, cards]);
 
   // Reset remark filter when switching channels (they have different filter options)
   useEffect(() => {
@@ -157,18 +169,35 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     return cards;
   };
 
+  const appendActionHistory = (card: CardType, action: 'Approved' | 'Terminated' | 'Revised' | 'Redo', actedAt: string): CardType['assignmentHistory'] => {
+    const history = card.assignmentHistory ?? [];
+    return [...history, {
+      assignedTo: card.assignedTo ?? '',
+      assignedAt: actedAt,
+      assignedBy: userName,
+      action,
+    }];
+  };
+
   const filteredCards = useMemo(() => {
     let filtered = cards;
 
-    // Filter by user assignment (regular users only see their assigned cards)
+    // Filter by user assignment: users only see cards currently assigned to them.
+    // The fallback (unassigned + created by user) only applies when the card has
+    // never been forwarded to anyone else — avoids showing stale cards to senders.
     if (userRole === 'user') {
-      // Users see cards from when assigned until reassigned or terminated/approved
       filtered = filtered.filter(card => {
-        // Must be assigned to this user
-        if (card.assignedTo !== userName) return false;
-        
-        // Show the card regardless of date/remarks if assigned and active
-        return true;
+        if (card.assignedTo === userName) return true;
+        // Only show an unassigned card to the user if it was self-created AND
+        // has never been assigned to a different person (i.e. history only has
+        // self-assignments, meaning it was never forwarded away).
+        if (!card.assignedTo) {
+          const history = card.assignmentHistory ?? [];
+          const wasForwardedToOther = history.some(h => h.assignedTo && h.assignedTo !== userName);
+          const selfCreated = history.some(h => h.assignedBy === userName && h.assignedTo === userName);
+          if (selfCreated && !wasForwardedToOther) return true;
+        }
+        return false;
       });
       
       // Apply date filtering for terminated/approved/completed cards only
@@ -247,6 +276,24 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     return filtered;
   }, [cards, quoteSearch, dateFilter, dayDate, weekEndDate, weekRangeDays, monthFilterYear, monthFilterMonth, userRole, userName, userFilter, workStatusFilter, remarkTypeFilter]);
 
+  const approvedQuotationCards = useMemo(() => {
+    if (activeChannel !== 'Quotation') return [] as CardType[];
+    let approved = filterCardsByDate(cards).filter(card => card.approved);
+    if (userRole === 'user') {
+      approved = approved.filter(card => {
+        if (card.assignedTo === userName) return true;
+        if (!card.assignedTo) {
+          const history = card.assignmentHistory ?? [];
+          const wasForwardedToOther = history.some(h => h.assignedTo && h.assignedTo !== userName);
+          const selfCreated = history.some(h => h.assignedBy === userName && h.assignedTo === userName);
+          return selfCreated && !wasForwardedToOther;
+        }
+        return false;
+      });
+    }
+    return approved.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [activeChannel, cards, dateFilter, dayDate, weekEndDate, weekRangeDays, monthFilterYear, monthFilterMonth, userRole, userName]);
+
   const handleUpdateCard = (updatedCard: CardType) => {
     const updatedCards = cards.map(card =>
       card.id === updatedCard.id ? updatedCard : card
@@ -259,9 +306,15 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const updatedCards = cards.filter(card => card.id !== cardId);
     setCards(updatedCards);
     setSelectedCard(null);
+    setSelectedCardIsNew(false);
   };
 
-  const handleAddCard = (list: ListType) => {
+  /** Open a card that was JUST created — modal starts in edit mode. */
+  const openNewCard = (card: CardType) => { setSelectedCard(card); setSelectedCardIsNew(true); };
+  /** Open an existing card — modal starts in view mode. */
+  const openExistingCard = (card: CardType) => { setSelectedCard(card); setSelectedCardIsNew(false); };
+
+  const handleAddCard = async (list: ListType) => {
     // ALL Work Order channel cards require PO doc before creation
     if (activeChannel === 'Work Order') {
       setWOPreCreate({ list, woNumber: '', companyCode: 'GRP', poFile: null, qtnFile: null });
@@ -281,11 +334,25 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       companyCode: undefined,
       remarks: [],
       listHistory: [{ list, enteredAt: _now }],
+      // Non-admin users are automatically assigned to their own card so it
+      // immediately appears in their filtered view.
+      assignedTo: userRole !== 'admin' ? userName : undefined,
+      userWorkStatus: userRole !== 'admin' ? 'Assigned' : undefined,
+      assignmentHistory: userRole !== 'admin'
+        ? [{ assignedTo: userName, assignedAt: _now, assignedBy: userName }]
+        : [],
       createdAt: _now,
       updatedAt: _now,
     };
-    setCards([...cards, newCard]);
-    setSelectedCard(newCard);
+    // Persist to DB first — file uploads & WebSocket broadcasts require the card to exist.
+    try {
+      const created = await onCreateInChannel(activeChannel, newCard);
+      openNewCard(created);
+    } catch {
+      // Fallback: add locally if API is unavailable
+      setCards([...cards, newCard]);
+      openNewCard(newCard);
+    }
   };
 
   const handleWOPreCreateConfirm = async () => {
@@ -306,6 +373,12 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       companyCode: woPreCreate.companyCode || 'GRP',
       remarks: [],
       listHistory: [{ list: woPreCreate.list, enteredAt: _woNow }],
+      // Non-admin users are automatically assigned to their own card.
+      assignedTo: userRole !== 'admin' ? userName : undefined,
+      userWorkStatus: userRole !== 'admin' ? 'Assigned' : undefined,
+      assignmentHistory: userRole !== 'admin'
+        ? [{ assignedTo: userName, assignedAt: _woNow, assignedBy: userName }]
+        : [],
       createdAt: _woNow,
       updatedAt: _woNow,
     };
@@ -352,11 +425,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         quotationDocUrl: qtnDocUrl,
         updatedAt: new Date().toISOString(),
       };
-      // setSelectedCard immediately so the admin sees the doc in the modal.
-      // The WS doc_uploaded broadcast from the upload endpoint will update cardsByChannel.
-      setSelectedCard(withDocs);
+      // Open in edit mode so the user can fill in card details right away.
+      openNewCard(withDocs);
     } else {
-      setSelectedCard(created);
+      openNewCard(created);
     }
   };
 
@@ -389,8 +461,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const card = cards.find(c => c.id === cardId);
     if (!card) return;
 
+    const actionedAt = new Date().toISOString();
+
     const updatedCards = cards.map(c =>
-      c.id === cardId ? { ...c, approved: true, updatedAt: new Date().toISOString() } : c
+      c.id === cardId ? { ...c, approved: true, assignmentHistory: appendActionHistory(c, 'Approved', actionedAt), updatedAt: actionedAt } : c
     );
     setCards(updatedCards);
 
@@ -422,8 +496,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   };
 
   const handleTerminateCard = (cardId: string) => {
+    const actionedAt = new Date().toISOString();
     const updatedCards = cards.map(card =>
-      card.id === cardId ? { ...card, terminated: true } : card
+      card.id === cardId ? { ...card, terminated: true, assignmentHistory: appendActionHistory(card, 'Terminated', actionedAt), updatedAt: actionedAt } : card
     );
     setCards(updatedCards);
   };
@@ -436,8 +511,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   };
 
   const handleUnterminateCard = (cardId: string) => {
+    const actionedAt = new Date().toISOString();
     const updatedCards = cards.map(card =>
-      card.id === cardId ? { ...card, terminated: false } : card
+      card.id === cardId ? { ...card, terminated: false, assignmentHistory: appendActionHistory(card, 'Redo', actionedAt), updatedAt: actionedAt } : card
     );
     setCards(updatedCards);
   };
@@ -453,6 +529,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const baseQuote = card.quoteNumber.replace(/\/R\d+$/, '');
     const newQuoteNumber = `${baseQuote}/R${revNum}`;
     const now = new Date().toISOString();
+    const revisedHistory = appendActionHistory(card, 'Revised', now);
+    setCards(cards.map(c => c.id === cardId ? { ...c, assignmentHistory: revisedHistory, updatedAt: now } : c));
     const clone: CardType = {
       ...card,
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -475,6 +553,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       completionDocUrl: undefined,
       completedAt: undefined,
       remarks: [],
+      assignmentHistory: revisedHistory,
       listHistory: [{ list: 'Quotation' as ListType, enteredAt: now }],
       createdAt: now,
       updatedAt: now,
@@ -482,10 +561,24 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     onCreateInChannel('Quotation', clone);
   };
 
-  const handleAssignUser = (cardId: string, userName: string | undefined) => {
-    const updatedCards = cards.map(card =>
-      card.id === cardId ? { ...card, assignedTo: userName, userWorkStatus: 'Assigned' as UserWorkStatus } : card
-    );
+  const handleAssignUser = (cardId: string, assigneeName: string | undefined) => {
+    const now = new Date().toISOString();
+    const updatedCards = cards.map(card => {
+      if (card.id !== cardId) return card;
+      const history = card.assignmentHistory ?? [];
+      const last = history[history.length - 1];
+      const sameAsCurrent = (card.assignedTo ?? '') === (assigneeName ?? '');
+      const sameAsLast = !!assigneeName && !!last && last.assignedTo === assigneeName && last.assignedBy === userName;
+      return {
+        ...card,
+        assignedTo: assigneeName,
+        userWorkStatus: assigneeName ? ('Assigned' as UserWorkStatus) : undefined,
+        assignmentHistory: (assigneeName && !sameAsCurrent && !sameAsLast)
+          ? [...history, { assignedTo: assigneeName, assignedAt: now, assignedBy: userName }]
+          : history,
+        updatedAt: now,
+      };
+    });
     setCards(updatedCards);
   };
 
@@ -805,6 +898,14 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
 
             {/* Filter Controls */}
             <div className="flex items-center gap-2">
+              {activeChannel === 'Quotation' && (
+                <button
+                  onClick={() => setShowApprovedCardsModal(true)}
+                  className="px-3 py-1.5 text-xs font-medium bg-green-50 border border-green-200 text-green-700 rounded-lg hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-400"
+                >
+                  Approved Cards
+                </button>
+              )}
               {/* User Filter (Admin only) */}
               {userRole === 'admin' && (
                 <select
@@ -870,7 +971,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                   key={list}
                   list={list}
                   cards={filteredCards.filter(card => card.list === list)}
-                  onCardClick={setSelectedCard}
+                  onCardClick={openExistingCard}
                   onAddCard={() => handleAddCard(list)}
                   onDeleteCard={handleDeleteCard}
                   onApproveCard={handleApproveCard}
@@ -887,6 +988,67 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               ))}
             </div>
           </DragDropContext>
+        </div>
+      )}
+
+      {showApprovedCardsModal && activeChannel === 'Quotation' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 bg-gradient-to-r from-green-600 to-emerald-500 text-white">
+              <div>
+                <h3 className="text-lg font-semibold">Approved Quotation Cards</h3>
+                <p className="text-xs text-green-50 mt-0.5">Filtered by current {dateFilter} selection</p>
+              </div>
+              <button
+                onClick={() => setShowApprovedCardsModal(false)}
+                className="p-2 rounded-lg hover:bg-white/10"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-4 bg-gray-50">
+              {approvedQuotationCards.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 bg-white py-12 text-center text-sm text-gray-400">
+                  No approved cards for the selected {dateFilter} filter.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {approvedQuotationCards.map(card => (
+                    <button
+                      key={card.id}
+                      onClick={() => {
+                        setShowApprovedCardsModal(false);
+                        openExistingCard(card);
+                      }}
+                      className="w-full text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-green-300 hover:shadow-sm transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                            <p className="text-sm font-semibold text-gray-800 truncate">{card.quoteNumber}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500 truncate">{card.subject || 'No subject'}</p>
+                          <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-400 flex-wrap">
+                            <span>{card.list}</span>
+                            <span>•</span>
+                            <span>{card.date}</span>
+                            {card.assignedTo && (
+                              <>
+                                <span>•</span>
+                                <span>Assigned to {card.assignedTo}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="px-2 py-1 rounded-full text-[10px] font-semibold bg-green-100 text-green-700">Approved</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1259,7 +1421,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       {selectedCard && (
         <CardModal
           card={selectedCard}
-          onClose={() => setSelectedCard(null)}
+          isNew={selectedCardIsNew}
+          onClose={() => { setSelectedCard(null); setSelectedCardIsNew(false); }}
           onUpdate={handleUpdateCard}
           onDelete={handleDeleteCard}
           userRole={userRole}

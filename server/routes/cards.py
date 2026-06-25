@@ -101,7 +101,9 @@ class CardIn(BaseModel):
     terminated: bool = False
     assigned_to_username: Optional[str] = None    # resolved → user_id
     user_work_status: Optional[str] = None        # WorkingStatus value
+    payment_percent: Optional[int] = 0
     completed_at: Optional[str] = None
+    assignment_history: Optional[list] = None
     purchase_order_doc_name: Optional[str] = None
     purchase_order_doc_url: Optional[str] = None
     quotation_doc_name: Optional[str] = None
@@ -136,6 +138,14 @@ def _resolve_user_id(db: Session, username: Optional[str]) -> Optional[int]:
         return None
     u = db.query(User).filter(User.username == username, User.is_deleted == False).first()
     return u.user_id if u else None
+
+
+def _clamp_payment_percent(v: Optional[int]) -> int:
+    try:
+        n = int(v if v is not None else 0)
+    except (ValueError, TypeError):
+        n = 0
+    return max(0, min(100, n))
 
 
 # ── Output helpers ───────────────────────────────────────────────────────────
@@ -205,8 +215,10 @@ def _card_to_dict(card: Card) -> dict:
         "approved":             card.approved,
         "terminated":           card.terminated,
         "assignedTo":           card.assigned_to,
-        "assignedToUsername":   card.assigned_user.username if card.assigned_user else None,
+        "assignedToUsername":   card.assigned_to_name or (card.assigned_user.username if card.assigned_user else None),
         "userWorkStatus":       card.user_work_status.value if card.user_work_status else None,
+        "paymentPercent":       card.payment_percent or 0,
+        "assignmentHistory":    card.assignment_history or [],
         "completedAt":          card.completed_at.isoformat() if card.completed_at else None,
         "purchaseOrderDocName": card.purchase_order_doc_name,
         "purchaseOrderDocUrl":  card.purchase_order_doc_url,
@@ -298,7 +310,10 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
         approved=card_in.approved,
         terminated=card_in.terminated,
         assigned_to=uid,
+        assigned_to_name=card_in.assigned_to_username or None,
         user_work_status=status_val,
+        payment_percent=_clamp_payment_percent(card_in.payment_percent),
+        assignment_history=card_in.assignment_history or [],
         purchase_order_doc_name=card_in.purchase_order_doc_name,
         purchase_order_doc_url=card_in.purchase_order_doc_url,
         quotation_doc_name=card_in.quotation_doc_name,
@@ -372,7 +387,10 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
     card.approved                = card_in.approved
     card.terminated              = card_in.terminated
     card.assigned_to             = uid
+    card.assigned_to_name        = card_in.assigned_to_username or None
     card.user_work_status        = status_val
+    card.payment_percent         = _clamp_payment_percent(card_in.payment_percent)
+    card.assignment_history      = card_in.assignment_history if card_in.assignment_history is not None else (card.assignment_history or [])
     card.purchase_order_doc_name = card_in.purchase_order_doc_name
     card.purchase_order_doc_url  = card_in.purchase_order_doc_url
     card.quotation_doc_name      = card_in.quotation_doc_name

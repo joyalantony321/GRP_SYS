@@ -115,8 +115,11 @@ class Card(Base):
     approved                = Column(Boolean, default=False)
     terminated              = Column(Boolean, default=False)
     assigned_to             = Column(Integer, ForeignKey("users.user_id"), nullable=True)
+    assigned_to_name        = Column(String(100), nullable=True)   # raw username, always set
     user_work_status        = Column(Enum(WorkingStatus), nullable=True)
+    payment_percent         = Column(Integer, nullable=False, default=0)
     completed_at            = Column(DateTime(timezone=True), nullable=True)
+    assignment_history      = Column(JSON, nullable=True, default=list)
 
     # Document references (stored as file paths on server)
     purchase_order_doc_name = Column(String(255), nullable=True)

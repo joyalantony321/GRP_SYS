@@ -37,6 +37,20 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Fetch wrapper that always uses the Next.js local API routes (no external backend). */
+async function localReq<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    ...init,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Local API /api${path} → ${res.status}: ${err}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
 // ── Types mirroring backend responses ────────────────────────────────────
 
 export interface ApiUser {
@@ -64,34 +78,34 @@ export interface AppDataResponse {
 // ── User / Auth ───────────────────────────────────────────────────────────
 
 export const getAppData = async (): Promise<AppDataResponse> => {
-  const data = await req<AppDataResponse>('/users/app-data');
+  const data = await localReq<AppDataResponse>('/users/app-data');
   _depsCache = data.departments;
   return data;
 };
 
 export const createUser = (username: string, pin: string, dep_id?: number): Promise<ApiUser> =>
-  req<ApiUser>('/users/', {
+  localReq<ApiUser>('/users', {
     method: 'POST',
     body: JSON.stringify({ username, pin, dep_id: dep_id ?? null }),
   });
 
 export const updateUser = (userId: number, data: { pin?: string; dep_id?: number }): Promise<ApiUser> =>
-  req<ApiUser>(`/users/${userId}`, {
+  localReq<ApiUser>(`/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
 
 export const softDeleteUser = (userId: number): Promise<{ detail: string }> =>
-  req(`/users/${userId}`, { method: 'DELETE' });
+  localReq(`/users/${userId}`, { method: 'DELETE' });
 
 export const restoreUser = (userId: number): Promise<ApiUser> =>
-  req<ApiUser>(`/users/${userId}/restore`, { method: 'POST' });
+  localReq<ApiUser>(`/users/${userId}/restore`, { method: 'POST' });
 
 export const permanentlyDeleteUser = (userId: number): Promise<void> =>
-  req<void>(`/users/${userId}/permanent`, { method: 'DELETE' });
+  localReq<void>(`/users/${userId}/permanent`, { method: 'DELETE' });
 
 export const updateAdminPin = (pin: string): Promise<{ detail: string }> =>
-  req(`/users/settings/admin-pin`, {
+  localReq(`/settings/admin-pin`, {
     method: 'PUT',
     body: JSON.stringify({ pin }),
   });
@@ -100,8 +114,13 @@ export const updateAdminPin = (pin: string): Promise<{ detail: string }> =>
 
 /** Map backend card response → frontend Card type */
 export function mapCard(c: Record<string, unknown>): Card {
+  const rawHistory = c.assignmentHistory as unknown;
+  const assignmentHistory = Array.isArray(rawHistory)
+    ? rawHistory as { assignedTo: string; assignedAt: string; assignedBy?: string }[]
+    : [];
+
   return {
-    id:                    c.id as string,
+    id:                    String(c.id ?? ''),
     quoteNumber:           (c.quoteNumber as string) ?? '',
     revisionNumber:        (c.revisionNumber as number) ?? undefined,
     workOrderNumber:       (c.workOrderNumber as string) ?? undefined,
@@ -116,7 +135,9 @@ export function mapCard(c: Record<string, unknown>): Card {
     terminated:            (c.terminated as boolean) ?? false,
     assignedTo:            (c.assignedToUsername as string) ?? (c.assignedTo as string) ?? undefined,
     userWorkStatus:        (c.userWorkStatus as UserWorkStatus) ?? undefined,
+    paymentPercent:        typeof c.paymentPercent === 'number' ? (c.paymentPercent as number) : 0,
     completedAt:           (c.completedAt as string) ?? undefined,
+    assignmentHistory,
     purchaseOrderDocName:  (c.purchaseOrderDocName as string) ?? undefined,
     purchaseOrderDocUrl:   (c.purchaseOrderDocUrl as string) ?? undefined,
     quotationDocName:      (c.quotationDocName as string) ?? undefined,
@@ -210,6 +231,8 @@ function toCardIn(card: Card, performedBy?: number) {
     terminated:             card.terminated ?? false,
     assigned_to_username:   card.assignedTo ?? null,
     user_work_status:       card.userWorkStatus ?? null,
+    payment_percent:        typeof card.paymentPercent === 'number' ? card.paymentPercent : 0,
+    assignment_history:     card.assignmentHistory ?? [],
     completed_at:           card.completedAt ?? null,
     purchase_order_doc_name: card.purchaseOrderDocName ?? null,
     purchase_order_doc_url:  card.purchaseOrderDocUrl ?? null,

@@ -14,13 +14,16 @@ interface Props {
   userName: string;
   userDepartment?: Department | '';
   channel: ChannelType;
+  /** True when the modal is opened for a brand-new card — starts in edit mode. */
+  isNew?: boolean;
 }
 
-export default function CardModal({ card, onClose, onUpdate, onDelete, userRole, userName, userDepartment, channel }: Props) {
+export default function CardModal({ card, onClose, onUpdate, onDelete, userRole, userName, userDepartment, channel, isNew }: Props) {
   // Admin sees all lists; regular users only see their permitted lists
   const lists = getPermittedLists(channel, userRole, userDepartment);
   const channelDepts = CHANNEL_DEPARTMENTS[channel];
-  const [isEditing, setIsEditing] = useState(false);
+  // New cards open directly in edit mode; existing cards open in view mode.
+  const [isEditing, setIsEditing] = useState(isNew ?? false);
   const [editedCard, setEditedCard] = useState(card);
   const [showAddRemark, setShowAddRemark] = useState(false);
   const [selectedLists, setSelectedLists] = useState<ListType[]>([card.list]);
@@ -35,6 +38,11 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   const [docUploading, setDocUploading] = useState<Record<string, boolean>>({});
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
+  const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
+  const modalPaymentPercent = Math.max(0, Math.min(100, Number(editedCard.paymentPercent ?? card.paymentPercent ?? 0)));
+  const modalPaymentHue = Math.round((modalPaymentPercent / 100) * 120);
+  const modalPaymentColor = `hsl(${modalPaymentHue} 78% 40%)`;
+  const modalPaymentTrack = `conic-gradient(${modalPaymentColor} ${modalPaymentPercent * 3.6}deg, #e5e7eb ${modalPaymentPercent * 3.6}deg)`;
 
   const _performedBy = (): number | undefined => {
     const v = typeof window !== 'undefined' ? localStorage.getItem('userId') : null;
@@ -369,6 +377,22 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                     <p className="text-sm text-gray-600 leading-snug">{card.projectLocation}</p>
                   )}
                 </div>
+
+                {isPaymentViewer && (
+                  <div className="pt-1">
+                    <div className="inline-flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50">
+                      <div className="relative w-12 h-12 rounded-full" style={{ background: modalPaymentTrack }}>
+                        <div className="absolute inset-[4px] rounded-full bg-white flex items-center justify-center">
+                          <span className="text-[11px] font-semibold text-gray-700">{modalPaymentPercent}%</span>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-700">Payment Received</p>
+                        <p className="text-[11px] text-gray-400">Visible to Accounts and Admin</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ── Documents ── */}
