@@ -6,6 +6,7 @@
 import { Card, ChannelType, ListType, UserWorkStatus } from '@/types';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const FALLBACK_BASES = ['http://localhost:8001', 'http://localhost:8000'];
 
 /** Module-level departments cache, populated by getAppData(). */
 let _depsCache: ApiDepartment[] = [];
@@ -24,17 +25,40 @@ function depNamesToIds(names: string[] | undefined): number[] | null {
 
 // ── Generic fetch wrapper ─────────────────────────────────────────────────
 
+function buildBaseCandidates() {
+  const bases = [BASE, ...FALLBACK_BASES].map(b => b.replace(/\/$/, ''));
+  return Array.from(new Set(bases));
+}
+
+function isNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'TypeError' || /fetch/i.test(error.message);
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-    ...init,
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`API ${path} → ${res.status}: ${err}`);
+  const bases = buildBaseCandidates();
+  let lastError: unknown;
+
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}${path}`, {
+        headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+        ...init,
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`API ${path} via ${base} → ${res.status}: ${err}`);
+      }
+      if (res.status === 204) return undefined as T;
+      return res.json();
+    } catch (error) {
+      lastError = error;
+      if (!isNetworkError(error)) throw error;
+    }
   }
-  if (res.status === 204) return undefined as T;
-  return res.json();
+
+  const details = lastError instanceof Error ? lastError.message : String(lastError ?? 'Unknown error');
+  throw new Error(`Unable to reach backend for ${path}. Tried: ${bases.join(', ')}. Last error: ${details}`);
 }
 
 /** Fetch wrapper that always uses the Next.js local API routes (no external backend). */

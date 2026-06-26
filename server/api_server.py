@@ -20,7 +20,13 @@ from routes import cards, users, files, audit
 
 load_dotenv()
 
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3001").split(",")]
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+    ).split(",")
+]
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
@@ -32,9 +38,15 @@ async def lifespan(app: FastAPI):
     # Add columns introduced after initial schema (idempotent)
     with engine.connect() as conn:
         try:
-            conn.execute(__import__('sqlalchemy').text(
-                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER"
-            ))
+            patches = [
+                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER",
+                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(100)",
+                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
+                "ALTER TABLE remarks ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(200)",
+            ]
+            for sql in patches:
+                conn.execute(__import__('sqlalchemy').text(sql))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -52,6 +64,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

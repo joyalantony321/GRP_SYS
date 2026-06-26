@@ -117,6 +117,7 @@ INSERT INTO lists (list_name, channel_id) VALUES
 CREATE TABLE cards (
     id                      VARCHAR(64)  PRIMARY KEY,
     quote_number            VARCHAR(100),
+    revision_number         INTEGER,
     work_order_number       VARCHAR(100),
     company_code            VARCHAR(20),
     date                    DATE         NOT NULL,
@@ -133,7 +134,10 @@ CREATE TABLE cards (
 
     -- Assignment
     assigned_to             INT          REFERENCES users(user_id) ON DELETE SET NULL,
+    assigned_to_name        VARCHAR(100),
     user_work_status        working_status_type DEFAULT 'Unassigned',
+    payment_percent         INTEGER      NOT NULL DEFAULT 0,
+    assignment_history      JSONB,
 
     -- Document references (file stored on disk, URL kept here)
     purchase_order_doc_name VARCHAR(255),
@@ -159,6 +163,7 @@ CREATE TABLE remarks (
     tags                TEXT[],
     description         TEXT,
     created_by          INT          REFERENCES users(user_id) ON DELETE SET NULL,
+    created_by_name     VARCHAR(200),
     visible_dep_ids     INT[],       -- array of dep_id values
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
@@ -446,6 +451,31 @@ CREATE TRIGGER trg_wo_details_updated_at
 CREATE TRIGGER trg_oc_details_updated_at
     BEFORE UPDATE ON order_confirmation_details
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- =============================================================================
+-- APP DB USER + PRIVILEGES (for backend connection)
+-- =============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grp_sys_app') THEN
+        CREATE ROLE grp_sys_app LOGIN PASSWORD 'GrpSysApp_2026';
+    ELSE
+        ALTER ROLE grp_sys_app WITH LOGIN PASSWORD 'GrpSysApp_2026';
+    END IF;
+END
+$$;
+
+GRANT CONNECT ON DATABASE "GRP_SYS" TO grp_sys_app;
+GRANT USAGE, CREATE ON SCHEMA public TO grp_sys_app;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+ON ALL TABLES IN SCHEMA public TO grp_sys_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO grp_sys_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+ON TABLES TO grp_sys_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO grp_sys_app;
 
 -- =============================================================================
 -- END OF SCHEMA

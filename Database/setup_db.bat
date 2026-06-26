@@ -21,11 +21,14 @@ set PG_PORT=5433
 set PG_USER=postgres
 set PG_DB=GRP_SYS
 set PGPASSWORD=RdDpp2M47i
+set APP_DB_USER=grp_sys_app
+set APP_DB_PASSWORD=GrpSysApp_2026
 set BACKEND_URL=http://localhost:8001/health
 set SCRIPT=%~dp0grp_sys_schema.sql
 
 :: Root of project (one folder up from Database\)
 set PROJECT_ROOT=%~dp0..
+set SERVER_ENV=%PROJECT_ROOT%\server\.env
 
 :: psql path — tries PATH first, then common install locations
 set PSQL=psql
@@ -41,12 +44,13 @@ echo  ============================================================
 echo   GRP_SYS — Database + Backend Setup
 echo   Postgres : %PG_HOST%:%PG_PORT%  (Docker container)
 echo   Database : %PG_DB%
+echo   App User : %APP_DB_USER%
 echo   Backend  : %BACKEND_URL%
 echo  ============================================================
 echo.
 
 :: ── Step 1: Check Docker is running ──────────────────────────────────────
-echo [1/5] Checking Docker...
+echo [1/6] Checking Docker...
 docker info >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -60,7 +64,7 @@ echo  OK — Docker is running.
 echo.
 
 :: ── Step 2: Start postgres container ─────────────────────────────────────
-echo [2/5] Starting PostgreSQL container (grp_sys_postgres)...
+echo [2/6] Starting PostgreSQL container (grp_sys_postgres)...
 cd /d "%PROJECT_ROOT%"
 docker-compose up -d postgres
 if %ERRORLEVEL% NEQ 0 (
@@ -94,7 +98,7 @@ echo  PostgreSQL is healthy.
 echo.
 
 :: ── Step 3: Verify database exists ───────────────────────────────────────
-echo [3/5] Verifying database "%PG_DB%" exists...
+echo [3/6] Verifying database "%PG_DB%" exists...
 %PSQL% -h %PG_HOST% -p %PG_PORT% -U %PG_USER% -tc "SELECT 1 FROM pg_database WHERE datname='%PG_DB%';" postgres | find "1" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo  Database not found — creating "%PG_DB%"...
@@ -111,7 +115,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 
 :: ── Step 4: Run schema SQL (tables + seed data) ───────────────────────────
-echo [4/5] Creating tables and loading seed data...
+echo [4/6] Creating tables and loading seed data...
 echo  Running: %SCRIPT%
 echo.
 %PSQL% -h %PG_HOST% -p %PG_PORT% -U %PG_USER% -d %PG_DB% -f "%SCRIPT%"
@@ -125,8 +129,41 @@ echo.
 echo  Tables created and seed data loaded.
 echo.
 
-:: ── Step 5: Start backend + frontend, verify connection ──────────────────
-echo [5/5] Starting backend and frontend containers...
+:: ── Step 5: Create/update app DB user + grants + .env ─────────────────────
+echo [5/6] Creating app DB user and granting permissions...
+%PSQL% -h %PG_HOST% -p %PG_PORT% -U %PG_USER% -d %PG_DB% -c "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%APP_DB_USER%') THEN CREATE ROLE %APP_DB_USER% LOGIN PASSWORD '%APP_DB_PASSWORD%'; ELSE ALTER ROLE %APP_DB_USER% WITH LOGIN PASSWORD '%APP_DB_PASSWORD%'; END IF; END $$;"
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo  ERROR: Failed creating/updating app DB user.
+    pause
+    exit /b 1
+)
+
+%PSQL% -h %PG_HOST% -p %PG_PORT% -U %PG_USER% -d %PG_DB% -c "GRANT CONNECT ON DATABASE \"%PG_DB%\" TO %APP_DB_USER%; GRANT USAGE, CREATE ON SCHEMA public TO %APP_DB_USER%; GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO %APP_DB_USER%; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %APP_DB_USER%; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO %APP_DB_USER%; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %APP_DB_USER%;"
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo  ERROR: Failed granting permissions to app DB user.
+    pause
+    exit /b 1
+)
+
+echo  Writing server env file: %SERVER_ENV%
+(
+    echo DATABASE_URL=postgresql+psycopg://%APP_DB_USER%:%APP_DB_PASSWORD%@localhost:%PG_PORT%/%PG_DB%
+    echo DB_USER=%APP_DB_USER%
+    echo DB_PASSWORD=%APP_DB_PASSWORD%
+    echo DB_HOST=localhost
+    echo DB_PORT=%PG_PORT%
+    echo DB_NAME=%PG_DB%
+    echo API_HOST=0.0.0.0
+    echo API_PORT=8001
+    echo CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
+) > "%SERVER_ENV%"
+echo  App DB user and local server environment configured.
+echo.
+
+:: ── Step 6: Start backend + frontend, verify connection ──────────────────
+echo [6/6] Starting backend and frontend containers...
 docker-compose up -d backend frontend
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -161,6 +198,7 @@ echo  ============================================================
 echo   Setup Complete!
 echo.
 echo   PostgreSQL : localhost:5433  (DB: %PG_DB%)
+echo   DB User    : %APP_DB_USER%
 echo   Backend    : http://localhost:8001
 echo   Frontend   : http://localhost:3001
 echo   API Docs   : http://localhost:8001/docs
