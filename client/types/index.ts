@@ -36,8 +36,8 @@ export const CHANNEL_LISTS: Record<ChannelType, ListType[]> = {
 };
 
 export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
-  'Quotation': ['Quotation', 'Technical'],
-  'Work Order': ['Accounts', 'Technical', 'Delivery & Installation'],
+  'Quotation': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
+  'Work Order': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
   'Schedule': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
 };
 
@@ -45,17 +45,20 @@ export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
 // Admin always sees all lists. undefined = no access to that channel.
 export const DEPARTMENT_LISTS: Record<Department, Partial<Record<ChannelType, ListType[]>>> = {
   'Quotation': {
-    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
+    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Technical': {
     'Quotation': ['Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Accounts': {
-    'Work Order': ['Approval', 'Payments', 'Delivery', 'Installation'],
+    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Delivery & Installation': {
-    'Work Order': ['Work Order', 'Delivery', 'Installation'],
+    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
 };
 

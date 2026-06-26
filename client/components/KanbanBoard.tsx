@@ -94,7 +94,6 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       list={list}
       cards={filteredCards.filter(card => normalizeListType(card.list) === list)}
       onCardClick={openExistingCard}
-      onAddCard={() => handleAddCard(list)}
       onDeleteCard={handleDeleteCard}
       onApproveCard={handleApproveCard}
       onTerminateCard={handleTerminateCard}
@@ -375,6 +374,11 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       setCards([...cards, newCard]);
       openNewCard(newCard);
     }
+  };
+
+  const handleGlobalAddCard = () => {
+    if (lists.length === 0) return;
+    handleAddCard(lists[0]);
   };
 
   const handleWOPreCreateConfirm = async () => {
@@ -881,6 +885,19 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                   </div>
                 )}
               </div>
+
+              <button
+                onClick={handleGlobalAddCard}
+                disabled={lists.length === 0}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm ${
+                  lists.length > 0
+                    ? 'bg-pink-500 text-white hover:bg-pink-600'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Card</span>
+              </button>
 
               {/* View Mode Buttons */}
               <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
@@ -1607,6 +1624,28 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
             </div>
 
             <div className="px-6 py-5 space-y-5">
+              {/* Stage — required */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-gray-800">Stage</span>
+                  <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Required</span>
+                </div>
+                <select
+                  value={woPreCreate.list}
+                  onChange={(e) => setWOPreCreate(p => p ? { ...p, list: e.target.value as ListType } : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                >
+                  {WORK_ORDER_LISTS.map(stage => {
+                    const isAccessible = userRole === 'admin' || lists.includes(stage);
+                    return (
+                      <option key={stage} value={stage} disabled={!isAccessible}>
+                        {stage}{isAccessible ? '' : ' (No Access)'}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
               {/* Work Order Number — required */}
               <div>
                 <div className="flex items-center gap-2 mb-2">

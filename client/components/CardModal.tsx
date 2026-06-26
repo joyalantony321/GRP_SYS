@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Edit2, Save, Trash2, Plus, Check, FileText } from 'lucide-react';
 import { Card, ListType, Remark, RemarkType, Department, ChannelType, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists } from '@/types';
 import WorkOrderFormModal from './WorkOrderFormModal';
@@ -36,6 +36,10 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   const [showWOForm, setShowWOForm] = useState(false);
   const [showOCForm, setShowOCForm] = useState(false);
   const [docUploading, setDocUploading] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setEditedCard(card);
+  }, [card]);
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
   const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
@@ -114,14 +118,15 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     }));
 
     const updatedCard = {
-      ...card,
-      remarks: [...card.remarks, ...newRemarks],
+      ...editedCard,
+      remarks: [...editedCard.remarks, ...newRemarks],
       updatedAt: new Date().toISOString(),
     };
 
     onUpdate(updatedCard);
+    setEditedCard(updatedCard);
     setShowAddRemark(false);
-    setSelectedLists([card.list]);
+    setSelectedLists([editedCard.list]);
     setRemarkType('Active');
     setRemarkTags('');
     setRemarkDescription('');
@@ -129,17 +134,20 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   };
 
   const handleUpdateRemark = (remarkId: string) => {
-    const updatedRemarks = card.remarks.map(remark =>
+    const updatedRemarks = editedCard.remarks.map(remark =>
       remark.id === remarkId
         ? { ...remark, ...editRemarkData, updatedAt: new Date().toISOString() }
         : remark
     );
 
-    onUpdate({
-      ...card,
+    const updatedCard = {
+      ...editedCard,
       remarks: updatedRemarks,
       updatedAt: new Date().toISOString(),
-    });
+    };
+
+    onUpdate(updatedCard);
+    setEditedCard(updatedCard);
 
     setEditingRemarkId(null);
     setEditRemarkData({});
@@ -147,12 +155,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
   const handleDeleteRemark = (remarkId: string) => {
     if (confirm('Are you sure you want to delete this remark?')) {
-      const updatedRemarks = card.remarks.filter(remark => remark.id !== remarkId);
-      onUpdate({
-        ...card,
+      const updatedRemarks = editedCard.remarks.filter(remark => remark.id !== remarkId);
+      const updatedCard = {
+        ...editedCard,
         remarks: updatedRemarks,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      onUpdate(updatedCard);
+      setEditedCard(updatedCard);
     }
   };
 
@@ -781,7 +791,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
               <div className="space-y-4">
                 {lists.map(list => {
-                  const allListRemarks = card.remarks.filter(r => r.list === list);
+                  const allListRemarks = editedCard.remarks.filter(r => r.list === list);
 
                   // Filter remarks by department visibility for non-admin users
                   const listRemarks = userRole === 'admin'

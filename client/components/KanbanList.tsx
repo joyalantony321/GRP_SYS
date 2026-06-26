@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, MoreHorizontal, Filter } from 'lucide-react';
+import { MoreHorizontal, Filter } from 'lucide-react';
 import { Card as CardType, ListType, RemarkType, UserWorkStatus, Department } from '@/types';
 import KanbanCard from './KanbanCard';
 import { Droppable } from '@hello-pangea/dnd';
@@ -8,7 +8,6 @@ interface Props {
   list: ListType;
   cards: CardType[];
   onCardClick: (card: CardType) => void;
-  onAddCard: () => void;
   onDeleteCard: (cardId: string) => void;
   onApproveCard?: (cardId: string) => void;
   onTerminateCard?: (cardId: string) => void;
@@ -27,7 +26,6 @@ export default function KanbanList({
   list,
   cards,
   onCardClick,
-  onAddCard,
   onDeleteCard,
   onApproveCard,
   onTerminateCard,
@@ -235,16 +233,6 @@ export default function KanbanList({
           </div>
         )}
       </Droppable>
-
-      <div className="p-4 border-t border-gray-200">
-          <button
-            onClick={onAddCard}
-            className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg transition-colors border border-gray-200 hover:border-gray-300"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Card</span>
-          </button>
-        </div>
     </div>
   );
 }

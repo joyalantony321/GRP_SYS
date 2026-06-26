@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Download, Send } from 'lucide-react';
+import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Send } from 'lucide-react';
 import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, DEPARTMENTS, isWorkOrderList, normalizeListType } from '@/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Draggable } from '@hello-pangea/dnd';
 import { docUrl, getAppData } from '@/lib/api';
-import { exportOrderConfirmationPdf } from '@/lib/fillOrderConfirmationPdf';
 
 interface Props {
   card: Card;
@@ -29,7 +28,6 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const [assignDeptFilter, setAssignDeptFilter] = useState<Department | ''>('');
   const [pendingAssignee, setPendingAssignee] = useState<string>(card.assignedTo || '');
   const [isExpanded, setIsExpanded] = useState(false); // Both admin and user cards start collapsed
-  const [isExporting, setIsExporting] = useState(false);
   const [editingPayment, setEditingPayment] = useState(false);
   const [paymentInput, setPaymentInput] = useState<string>(String(card.paymentPercent ?? 0));
 
@@ -38,8 +36,6 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const assignableUsers = assignDeptFilter
     ? users.filter(u => u.department === assignDeptFilter)
     : users;
-
-  const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
 
   const loadUsers = () => {
     getAppData().then(data => {
@@ -73,6 +69,52 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const paymentTrack = `conic-gradient(${paymentColor} ${paymentPercent * 3.6}deg, #e5e7eb ${paymentPercent * 3.6}deg)`;
   const normalizedCurrentList = normalizeListType(currentList);
 
+  const toEpoch = (value?: string) => {
+    const ms = Date.parse(value ?? '');
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+
+  const getLatestRemarkForList = (remarks: Card['remarks'], list: ListType) => {
+    const listRemarks = remarks.filter(r => normalizeListType(r.list) === list);
+    if (listRemarks.length === 0) return null;
+
+    return listRemarks.reduce((latest, current) => {
+      const currentCreated = toEpoch(current.createdAt);
+      const latestCreated = toEpoch(latest.createdAt);
+      if (currentCreated !== latestCreated) {
+        return currentCreated > latestCreated ? current : latest;
+      }
+
+      const currentUpdated = toEpoch(current.updatedAt);
+      const latestUpdated = toEpoch(latest.updatedAt);
+      if (currentUpdated !== latestUpdated) {
+        return currentUpdated > latestUpdated ? current : latest;
+      }
+
+      // Deterministic tie-breaker: prefer later array entry (newer append order).
+      return current;
+    });
+  };
+
+  const getLatestRemarkOverall = (remarks: Card['remarks']) => {
+    if (remarks.length === 0) return null;
+    return remarks.reduce((latest, current) => {
+      const currentCreated = toEpoch(current.createdAt);
+      const latestCreated = toEpoch(latest.createdAt);
+      if (currentCreated !== latestCreated) {
+        return currentCreated > latestCreated ? current : latest;
+      }
+
+      const currentUpdated = toEpoch(current.updatedAt);
+      const latestUpdated = toEpoch(latest.updatedAt);
+      if (currentUpdated !== latestUpdated) {
+        return currentUpdated > latestUpdated ? current : latest;
+      }
+
+      return current;
+    });
+  };
+
   const handleSavePayment = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!onUpdateCard) return;
@@ -94,8 +136,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
     // ── Quotation channel: approved = green, remark-type based otherwise ──
     if (isQuotationChannel) {
       if (card.approved) return 'bg-green-100 border-l-4 border-l-green-500';
-      const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
-      const latestRemark = listRemarks[listRemarks.length - 1];
+      const latestRemark = getLatestRemarkForList(card.remarks, normalizedCurrentList);
       if (!latestRemark) return 'bg-white';
       switch (latestRemark.type) {
         case 'Active':   return 'border-l-4 border-l-red-500 bg-red-100';
@@ -122,10 +163,8 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
     // Work Order channel cards don't use remark-status badges
     if (isWOList) return null;
 
-    const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
-    if (listRemarks.length === 0) return null;
-
-    const latestRemark = listRemarks[listRemarks.length - 1];
+    const latestRemark = getLatestRemarkForList(card.remarks, normalizedCurrentList);
+    if (!latestRemark) return null;
 
     const colors = {
       Active: 'bg-red-500 text-white',
@@ -141,9 +180,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   };
 
   const getLatestListRemark = () => {
-    const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
-    if (listRemarks.length === 0) return null;
-    return listRemarks[listRemarks.length - 1];
+    return getLatestRemarkForList(card.remarks, normalizedCurrentList);
   };
 
   const getWorkStatusColor = (status?: UserWorkStatus) => {
@@ -160,11 +197,13 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   };
 
   const formatRemarkTimestamp = (timestamp: string) => {
-    return format(new Date(timestamp), 'dd/MM/yyyy, HH:mm:ss');
+    const ms = toEpoch(timestamp);
+    if (ms === 0) return timestamp || 'Unknown time';
+    return format(new Date(ms), 'dd/MM/yyyy, HH:mm:ss');
   };
 
-  const hasRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList).length > 0;
   const latestListRemark = getLatestListRemark();
+  const latestPreviewRemark = getLatestRemarkOverall(card.remarks);
   const assignmentTrail = (card.assignmentHistory ?? []).filter((entry, idx, arr) => {
     if (idx === 0) return true;
     const prev = arr[idx - 1];
@@ -412,47 +451,21 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
         </div>
       )}
 
-      {latestListRemark ? (
+      {latestPreviewRemark ? (
         <div className="space-y-2 text-xs text-gray-600">
           <div className="text-gray-700 leading-relaxed">
-            {latestListRemark.description}
+            {latestPreviewRemark.description}
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
             <User className="w-3 h-3" />
-            <span>by {latestListRemark.createdBy}</span>
+            <span>by {latestPreviewRemark.createdBy}</span>
             <span className="text-gray-400">•</span>
-            <span>{formatRemarkTimestamp(latestListRemark.createdAt)}</span>
+            <span>{formatRemarkTimestamp(latestPreviewRemark.createdAt)}</span>
           </div>
         </div>
       ) : (
         <div className="text-xs text-gray-400 italic">
           No remarks for this list yet
-        </div>
-      )}
-
-      {card.purchaseOrderDocName && (card.purchaseOrderDocData || card.purchaseOrderDocUrl) && !isDeliveryInstallation && (
-        <div className="mt-3">
-          <a
-            href={docUrl(card.purchaseOrderDocData || card.purchaseOrderDocUrl)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-medium text-amber-700 hover:text-amber-900"
-          >
-            📄 Purchase Order ({card.purchaseOrderDocName})
-          </a>
-        </div>
-      )}
-
-      {card.quotationDocName && (card.quotationDocData || card.quotationDocUrl) && !isDeliveryInstallation && (
-        <div className="mt-1">
-          <a
-            href={docUrl(card.quotationDocData || card.quotationDocUrl)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-medium text-purple-700 hover:text-purple-900"
-          >
-            📄 Quotation ({card.quotationDocName})
-          </a>
         </div>
       )}
 
@@ -493,34 +506,6 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               />
             </label>
           ) : null}
-        </div>
-      )}
-
-      {/* Export Order Confirmation PDF – visible to all roles on WO channel cards */}
-      {isWOList && (
-        <div className="mt-3 pt-3 border-t border-gray-200">
-          <button
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (!card.orderConfirmationDetails) {
-                alert('No Order Confirmation data saved for this card yet. Please fill the Order Confirmation form first.');
-                return;
-              }
-              setIsExporting(true);
-              try {
-                await exportOrderConfirmationPdf(card);
-              } catch (err) {
-                alert(`Export failed: ${(err as Error).message}`);
-              } finally {
-                setIsExporting(false);
-              }
-            }}
-            disabled={isExporting}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-300 text-white rounded text-xs font-medium transition-colors"
-          >
-            <Download className="w-3.5 h-3.5" />
-            {isExporting ? 'Exporting…' : 'Export Order Confirmation'}
-          </button>
         </div>
       )}
 
