@@ -61,6 +61,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     cardId: string;
     woNumber: string;
     companyCode: string;
+    assigneeName: string;
   } | null>(null);
 
   // Quotation revision: pending confirmation with revision number
@@ -113,6 +114,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   useEffect(() => {
     setRemarkTypeFilter('all');
   }, [activeChannel]);
+
+  const workOrderAssignableUsers = useMemo(() => {
+    return users.filter(u => !!u.department && CHANNEL_DEPARTMENTS['Work Order'].includes(u.department));
+  }, [users]);
 
   // Load users from API
   useEffect(() => {
@@ -476,14 +481,14 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       const knownCodes = ['GRP', 'GRPPT', 'CLX'];
       const firstSegment = (card.quoteNumber || '').split('/')[0].toUpperCase();
       const companyCode = knownCodes.includes(firstSegment) ? firstSegment : (card.companyCode || 'GRP');
-      setLpoApprovalPending({ cardId, woNumber: '', companyCode });
+      setLpoApprovalPending({ cardId, woNumber: '', companyCode, assigneeName: '' });
       return;
     }
 
-    _doApprove(cardId, undefined, undefined);
+    _doApprove(cardId, undefined, undefined, undefined);
   };
 
-  const _doApprove = (cardId: string, woNumber: string | undefined, companyCode: string | undefined) => {
+  const _doApprove = (cardId: string, woNumber: string | undefined, companyCode: string | undefined, assigneeName: string | undefined) => {
     const card = cards.find(c => c.id === cardId);
     if (!card) return;
 
@@ -501,6 +506,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         const firstSegment = (card.quoteNumber || '').split('/')[0].toUpperCase();
         return knownCodes.includes(firstSegment) ? firstSegment : (card.companyCode || 'GRP');
       })();
+      const now = new Date().toISOString();
       const clone: CardType = {
         ...card,
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -510,12 +516,15 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         terminated: false,
         workOrderNumber: woNumber ?? '0000',
         companyCode: resolvedCode,
-        assignedTo: undefined,
-        userWorkStatus: undefined,
+        assignedTo: assigneeName,
+        userWorkStatus: assigneeName ? 'Assigned' : undefined,
         remarks: [],
-        listHistory: [{ list: 'Work Order' as ListType, enteredAt: new Date().toISOString() }],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        assignmentHistory: assigneeName
+          ? [...(card.assignmentHistory ?? []), { assignedTo: assigneeName, assignedAt: now, assignedBy: userName }]
+          : (card.assignmentHistory ?? []),
+        listHistory: [{ list: 'Work Order' as ListType, enteredAt: now }],
+        createdAt: now,
+        updatedAt: now,
       };
       onCreateInChannel('Work Order', clone);
     }
@@ -1574,10 +1583,11 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
                   autoFocus
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && lpoApprovalPending.woNumber.trim()) {
+                    const validAssignee = workOrderAssignableUsers.some(u => u.name === lpoApprovalPending.assigneeName);
+                    if (e.key === 'Enter' && lpoApprovalPending.woNumber.trim() && validAssignee) {
                       const { cardId, woNumber, companyCode } = lpoApprovalPending;
                       setLpoApprovalPending(null);
-                      _doApprove(cardId, woNumber.trim(), companyCode);
+                      _doApprove(cardId, woNumber.trim(), companyCode, lpoApprovalPending.assigneeName);
                     }
                   }}
                 />
@@ -1585,19 +1595,44 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               {lpoApprovalPending.woNumber.trim() && (
                 <p className="text-xs text-green-600 font-medium">Work Order will be: {lpoApprovalPending.companyCode}/{lpoApprovalPending.woNumber.trim()}</p>
               )}
+
+              <div className="mt-4">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-800">Assign To</span>
+                  <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Required</span>
+                </div>
+                <input
+                  type="text"
+                  list="lpo-assignable-users"
+                  placeholder="Search user..."
+                  value={lpoApprovalPending.assigneeName}
+                  onChange={(e) => setLpoApprovalPending(p => p ? { ...p, assigneeName: e.target.value } : null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                <datalist id="lpo-assignable-users">
+                  {workOrderAssignableUsers.map(u => (
+                    <option key={u.name} value={u.name} label={`${u.name} — ${u.department || 'No Department'}`} />
+                  ))}
+                </datalist>
+                {workOrderAssignableUsers.some(u => u.name === lpoApprovalPending.assigneeName) && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Department: {workOrderAssignableUsers.find(u => u.name === lpoApprovalPending.assigneeName)?.department}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
               <button onClick={() => setLpoApprovalPending(null)} className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
               <button
-                disabled={!lpoApprovalPending.woNumber.trim()}
+                disabled={!lpoApprovalPending.woNumber.trim() || !workOrderAssignableUsers.some(u => u.name === lpoApprovalPending.assigneeName)}
                 onClick={() => {
-                  const { cardId, woNumber, companyCode } = lpoApprovalPending;
+                  const { cardId, woNumber, companyCode, assigneeName } = lpoApprovalPending;
                   setLpoApprovalPending(null);
-                  _doApprove(cardId, woNumber.trim(), companyCode);
+                  _doApprove(cardId, woNumber.trim(), companyCode, assigneeName);
                 }}
                 className={`px-5 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  lpoApprovalPending.woNumber.trim()
+                  (lpoApprovalPending.woNumber.trim() && workOrderAssignableUsers.some(u => u.name === lpoApprovalPending.assigneeName))
                     ? 'bg-green-500 hover:bg-green-600 text-white'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}

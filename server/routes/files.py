@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Card, Channel, AuditLogQuotation, AuditLogWorkOrder
+from models import Card, Channel, AuditLogQuotation, AuditLogWorkOrder, User
 from ws_manager import manager
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -28,6 +28,14 @@ DOC_TYPES = {
 }
 
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xlsx", ".jpg", ".jpeg", ".png"}
+
+
+def _validated_performed_by(db: Session, performed_by: Optional[int]) -> Optional[int]:
+    """Return a valid, non-deleted user_id for audit logs, else None."""
+    if performed_by is None:
+        return None
+    exists = db.query(User.user_id).filter(User.user_id == performed_by, User.is_deleted == False).first()
+    return performed_by if exists else None
 
 
 def _save_file(doc_type: str, original_name: str, data: bytes) -> tuple[str, str, str]:
@@ -63,6 +71,8 @@ async def upload_doc(
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
+    safe_performed_by = _validated_performed_by(db, performed_by)
+
     data = await file.read()
     saved_name, url, file_type = _save_file(doc_type, file.filename or "document", data)
 
@@ -78,7 +88,7 @@ async def upload_doc(
     if channel_name == "Work Order":
         db.add(AuditLogWorkOrder(
             action=action,
-            performed_by=performed_by,
+            performed_by=safe_performed_by,
             upload_wo_file_name=saved_name,
             upload_wo_file_path=url,
             upload_wo_file_type=file_type,
@@ -86,7 +96,7 @@ async def upload_doc(
     else:
         db.add(AuditLogQuotation(
             action=action,
-            performed_by=performed_by,
+            performed_by=safe_performed_by,
             upload_file_name=saved_name,
             upload_file_path=url,
             upload_file_type=file_type,
@@ -148,6 +158,8 @@ async def delete_doc(
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
+    safe_performed_by = _validated_performed_by(db, performed_by)
+
     subdir, name_col, url_col = DOC_TYPES[doc_type]
     current_url: Optional[str] = getattr(card, url_col)
     if current_url:
@@ -168,9 +180,9 @@ async def delete_doc(
 
     action = f"{doc_type}_doc_deleted"
     if channel_name == "Work Order":
-        db.add(AuditLogWorkOrder(action=action, performed_by=performed_by))
+        db.add(AuditLogWorkOrder(action=action, performed_by=safe_performed_by))
     else:
-        db.add(AuditLogQuotation(action=action, performed_by=performed_by))
+        db.add(AuditLogQuotation(action=action, performed_by=safe_performed_by))
 
     db.commit()
     db.refresh(card)
