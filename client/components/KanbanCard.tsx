@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Download, Send } from 'lucide-react';
-import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, DEPARTMENTS } from '@/types';
+import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, DEPARTMENTS, isWorkOrderList, normalizeListType } from '@/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Draggable } from '@hello-pangea/dnd';
 import { docUrl, getAppData } from '@/lib/api';
@@ -71,6 +71,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   const paymentHue = Math.round((paymentPercent / 100) * 120); // red(0) -> green(120)
   const paymentColor = `hsl(${paymentHue} 78% 40%)`;
   const paymentTrack = `conic-gradient(${paymentColor} ${paymentPercent * 3.6}deg, #e5e7eb ${paymentPercent * 3.6}deg)`;
+  const normalizedCurrentList = normalizeListType(currentList);
 
   const handleSavePayment = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -87,13 +88,13 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
     if (card.completedAt) return 'bg-green-50 border-l-4 border-l-green-500';
     if (card.terminated)  return 'bg-gray-200 border-l-4 border-l-gray-500';
 
-    const isQuotationChannel = ['Quotation', 'Submittal', 'Review', 'LPO'].includes(currentList);
-    const isWOChannel = ['Work Order', 'Accounts', 'Delivery', 'Installation'].includes(currentList);
+    const isQuotationChannel = ['Quotation', 'Submittal', 'Review', 'LPO'].includes(normalizedCurrentList);
+    const isWOChannel = isWorkOrderList(normalizedCurrentList);
 
     // ── Quotation channel: approved = green, remark-type based otherwise ──
     if (isQuotationChannel) {
       if (card.approved) return 'bg-green-100 border-l-4 border-l-green-500';
-      const listRemarks = card.remarks.filter(r => r.list === currentList);
+      const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
       const latestRemark = listRemarks[listRemarks.length - 1];
       if (!latestRemark) return 'bg-white';
       switch (latestRemark.type) {
@@ -115,13 +116,13 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
     return 'bg-white';
   };
 
-  const isWOList = ['Work Order', 'Accounts', 'Delivery', 'Installation'].includes(currentList);
+  const isWOList = isWorkOrderList(normalizedCurrentList);
 
   const getStatusBadge = () => {
     // Work Order channel cards don't use remark-status badges
     if (isWOList) return null;
 
-    const listRemarks = card.remarks.filter(r => r.list === currentList);
+    const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
     if (listRemarks.length === 0) return null;
 
     const latestRemark = listRemarks[listRemarks.length - 1];
@@ -140,7 +141,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
   };
 
   const getLatestListRemark = () => {
-    const listRemarks = card.remarks.filter(r => r.list === currentList);
+    const listRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList);
     if (listRemarks.length === 0) return null;
     return listRemarks[listRemarks.length - 1];
   };
@@ -162,7 +163,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
     return format(new Date(timestamp), 'dd/MM/yyyy, HH:mm:ss');
   };
 
-  const hasRemarks = card.remarks.filter(r => r.list === currentList).length > 0;
+  const hasRemarks = card.remarks.filter(r => normalizeListType(r.list) === normalizedCurrentList).length > 0;
   const latestListRemark = getLatestListRemark();
   const assignmentTrail = (card.assignmentHistory ?? []).filter((entry, idx, arr) => {
     if (idx === 0) return true;
@@ -456,7 +457,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
       )}
 
       {/* Completion doc for Installation list */}
-      {currentList === 'Installation' && (
+      {normalizedCurrentList === 'Installation' && (
         <div className="mt-2">
           {card.completionDocName && (card.completionDocData || card.completionDocUrl) ? (
             <a
@@ -551,7 +552,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
             </span>
           )}
           {/* Completed button — Installation list only, requires completion doc */}
-          {currentList === 'Installation' && !card.completedAt && onComplete && (
+          {normalizedCurrentList === 'Installation' && !card.completedAt && onComplete && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -569,7 +570,7 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
               Mark Completed
             </button>
           )}
-          {currentList === 'Installation' && card.completedAt && (
+          {normalizedCurrentList === 'Installation' && card.completedAt && (
             <span className="flex items-center gap-1 px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-medium">
               <CheckCircle className="w-3.5 h-3.5" />
               Completed

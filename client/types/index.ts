@@ -2,7 +2,24 @@ export type RemarkType = 'Active' | 'Pending' | 'Inactive';
 
 export type ListType =
   | 'Quotation' | 'Submittal' | 'Review' | 'LPO'
-  | 'Purchase Order' | 'Work Order' | 'Accounts' | 'Delivery' | 'Installation';
+  | 'Purchase Order' | 'Work Order' | 'Approval' | 'Payments' | 'Delivery' | 'Installation'
+  | 'Accounts';
+
+export const WORK_ORDER_LISTS = ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'] as const;
+
+export type WorkOrderListType = typeof WORK_ORDER_LISTS[number];
+
+export const LEGACY_WORK_ORDER_LIST_ALIASES: Record<string, WorkOrderListType> = {
+  Accounts: 'Approval',
+};
+
+export function normalizeListType(list: string): ListType {
+  return (LEGACY_WORK_ORDER_LIST_ALIASES[list] ?? list) as ListType;
+}
+
+export function isWorkOrderList(list: string): list is WorkOrderListType {
+  return WORK_ORDER_LISTS.includes(normalizeListType(list) as WorkOrderListType);
+}
 
 export type UserWorkStatus = 'Assigned' | 'Working' | 'Completed';
 
@@ -14,7 +31,7 @@ export const DEPARTMENTS: Department[] = ['Quotation', 'Technical', 'Accounts', 
 
 export const CHANNEL_LISTS: Record<ChannelType, ListType[]> = {
   'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-  'Work Order': ['Work Order', 'Accounts', 'Delivery', 'Installation'],
+  'Work Order': [...WORK_ORDER_LISTS],
   'Schedule': [],
 };
 
@@ -32,10 +49,10 @@ export const DEPARTMENT_LISTS: Record<Department, Partial<Record<ChannelType, Li
   },
   'Technical': {
     'Quotation': ['Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Accounts', 'Delivery', 'Installation'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Accounts': {
-    'Work Order': ['Accounts', 'Delivery', 'Installation'],
+    'Work Order': ['Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Delivery & Installation': {
     'Work Order': ['Work Order', 'Delivery', 'Installation'],
@@ -50,7 +67,7 @@ export function getPermittedLists(
 ): ListType[] {
   if (userRole === 'admin') return CHANNEL_LISTS[channel];
   if (!userDepartment) return [];
-  return DEPARTMENT_LISTS[userDepartment as Department]?.[channel] ?? [];
+  return (DEPARTMENT_LISTS[userDepartment as Department]?.[channel] ?? []).map(normalizeListType);
 }
 
 export interface Remark {
@@ -302,8 +319,9 @@ export interface AppData {
 
 /** Returns the departments that can access a specific list within a channel. */
 export function getDepartmentsForList(channel: ChannelType, list: ListType): Department[] {
+  const normalizedList = normalizeListType(list);
   return DEPARTMENTS.filter(dept => {
     const deptLists = DEPARTMENT_LISTS[dept as Department]?.[channel];
-    return deptLists ? deptLists.includes(list) : false;
+    return deptLists ? deptLists.map(normalizeListType).includes(normalizedList) : false;
   });
 }

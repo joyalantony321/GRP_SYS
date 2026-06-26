@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Filter, Plus, LayoutGrid, Table as TableIcon, BarChart3, Edit2, Trash2, User, Settings, Calendar, FileText, ClipboardList, ChevronDown, Check, X, CheckCircle, CalendarRange } from 'lucide-react';
-import { Card as CardType, ListType, RemarkType, UserWorkStatus, AppUser, ChannelType, Department, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists } from '@/types';
+import { Card as CardType, ListType, RemarkType, UserWorkStatus, AppUser, ChannelType, Department, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, WORK_ORDER_LISTS, getPermittedLists, normalizeListType } from '@/types';
 import KanbanList from './KanbanList';
 import CardModal from './CardModal';
 import { differenceInDays, differenceInWeeks, differenceInMonths, parseISO, format, startOfWeek, endOfWeek, eachDayOfInterval, addWeeks, subWeeks, addDays, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth } from 'date-fns';
@@ -82,11 +82,33 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     if (userRole !== 'user') return permitted;
     const channelLists = CHANNEL_LISTS[activeChannel];
     const listsWithAssigned = channelLists.filter(l =>
-      cards.some(c => c.list === l && c.assignedTo === userName)
+      cards.some(c => normalizeListType(c.list) === l && c.assignedTo === userName)
     );
     const merged = permitted.concat(listsWithAssigned.filter(l => !permitted.includes(l)));
     return channelLists.filter(l => merged.includes(l));
   }, [activeChannel, userRole, userDepartment, userName, cards]);
+
+  const renderKanbanList = (list: ListType, className?: string) => (
+    <KanbanList
+      key={list}
+      list={list}
+      cards={filteredCards.filter(card => normalizeListType(card.list) === list)}
+      onCardClick={openExistingCard}
+      onAddCard={() => handleAddCard(list)}
+      onDeleteCard={handleDeleteCard}
+      onApproveCard={handleApproveCard}
+      onTerminateCard={handleTerminateCard}
+      onUnterminateCard={handleUnterminateCard}
+      onCompleteCard={handleCompleteCard}
+      onReviseCard={activeChannel === 'Quotation' ? handleReviseCard : undefined}
+      onUpdateCard={handleUpdateCard}
+      onAssignUser={handleAssignUser}
+      onUpdateWorkStatus={handleUpdateWorkStatus}
+      userRole={userRole}
+      userDepartment={userDepartment}
+      className={className}
+    />
+  );
 
   // Reset remark filter when switching channels (they have different filter options)
   useEffect(() => {
@@ -967,28 +989,21 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       {viewMode === 'kanban' && (
         <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
           <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex gap-3 h-full w-full">
-              {lists.map(list => (
-                <KanbanList
-                  key={list}
-                  list={list}
-                  cards={filteredCards.filter(card => card.list === list)}
-                  onCardClick={openExistingCard}
-                  onAddCard={() => handleAddCard(list)}
-                  onDeleteCard={handleDeleteCard}
-                  onApproveCard={handleApproveCard}
-                  onTerminateCard={handleTerminateCard}
-                  onUnterminateCard={handleUnterminateCard}
-                  onCompleteCard={handleCompleteCard}
-                  onReviseCard={activeChannel === 'Quotation' ? handleReviseCard : undefined}
-                  onUpdateCard={handleUpdateCard}
-                  onAssignUser={handleAssignUser}
-                  onUpdateWorkStatus={handleUpdateWorkStatus}
-                  userRole={userRole}
-                  userDepartment={userDepartment}
-                />
-              ))}
-            </div>
+            {activeChannel === 'Work Order' ? (
+              <div className="grid h-full min-w-[1080px] grid-cols-1 gap-3 md:grid-cols-2 xl:min-w-0 xl:grid-cols-4 auto-rows-fr">
+                {lists.includes('Work Order') ? renderKanbanList('Work Order', 'h-full min-h-0') : <div />}
+                {lists.includes('Approval') ? renderKanbanList('Approval', 'h-full min-h-0') : <div />}
+                {lists.includes('Payments') ? renderKanbanList('Payments', 'h-full min-h-0') : <div />}
+                <div className="flex min-h-0 flex-col gap-3 xl:h-full">
+                  {lists.includes('Delivery') ? renderKanbanList('Delivery', 'flex-1 min-h-0') : <div className="flex-1" />}
+                  {lists.includes('Installation') ? renderKanbanList('Installation', 'flex-1 min-h-0') : <div className="flex-1" />}
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-3 h-full w-full">
+                {lists.map(list => renderKanbanList(list, 'h-full min-h-0'))}
+              </div>
+            )}
           </DragDropContext>
         </div>
       )}
@@ -1206,7 +1221,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
           'Review':       '#eab308',  // yellow
           'LPO':          '#f97316',  // orange
           'Work Order':   '#7c3aed',  // deep violet
-          'Accounts':     '#0d9488',  // teal
+          'Approval':     '#0d9488',  // teal
+          'Payments':     '#0891b2',  // sky
           'Delivery':     '#ef4444',  // red
           'Installation': '#16a34a',  // forest green
         };
@@ -1216,7 +1232,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
           'Review':       'bg-violet-100 text-violet-700',
           'LPO':          'bg-orange-100 text-orange-700',
           'Work Order':   'bg-purple-100 text-purple-700',
-          'Accounts':     'bg-teal-100 text-teal-700',
+          'Approval':     'bg-teal-100 text-teal-700',
+          'Payments':     'bg-sky-100 text-sky-700',
           'Delivery':     'bg-amber-100 text-amber-700',
           'Installation': 'bg-green-100 text-green-700',
         };

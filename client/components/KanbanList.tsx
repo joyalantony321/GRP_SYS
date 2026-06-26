@@ -20,6 +20,7 @@ interface Props {
   onUpdateWorkStatus?: (cardId: string, status: UserWorkStatus) => void;
   userRole: 'admin' | 'user';
   userDepartment?: Department | '';
+  className?: string;
 }
 
 export default function KanbanList({
@@ -38,6 +39,7 @@ export default function KanbanList({
   onUpdateWorkStatus,
   userRole,
   userDepartment,
+  className,
 }: Props) {
   const [statusFilter, setStatusFilter] = useState<RemarkType | 'all'>('all');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -107,7 +109,7 @@ export default function KanbanList({
   }, [cards, list]);
 
   return (
-    <div className="flex flex-col flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-gray-200">
+    <div className={`flex flex-col flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-gray-200 ${className ?? ''}`}>
       <div className="p-4 border-b border-gray-200">
         <div className={`flex items-center justify-between ${userRole === 'admin' ? 'mb-3' : ''}`}>
           <div className="flex items-center gap-3">

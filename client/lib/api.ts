@@ -3,7 +3,7 @@
  * All communication with the FastAPI backend goes through here.
  */
 
-import { Card, ChannelType, ListType, UserWorkStatus } from '@/types';
+import { Card, ChannelType, ListType, UserWorkStatus, normalizeListType } from '@/types';
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 const FALLBACK_BASES = ['http://localhost:8001', 'http://localhost:8000'];
@@ -142,6 +142,7 @@ export function mapCard(c: Record<string, unknown>): Card {
   const assignmentHistory = Array.isArray(rawHistory)
     ? rawHistory as { assignedTo: string; assignedAt: string; assignedBy?: string }[]
     : [];
+  const rawList = ((c.listName as string) ?? (c.list as string) ?? 'Quotation');
 
   return {
     id:                    String(c.id ?? ''),
@@ -153,7 +154,7 @@ export function mapCard(c: Record<string, unknown>): Card {
     salesPerson:           (c.salesPerson as string) ?? '',
     subject:               (c.subject as string) ?? '',
     projectLocation:       (c.projectLocation as string) ?? '',
-    list:                  (c.listName as ListType) ?? (c.list as ListType),
+    list:                  normalizeListType(rawList),
     channel:               (c.channelName as ChannelType) ?? (c.channel as ChannelType),
     approved:              (c.approved as boolean) ?? false,
     terminated:            (c.terminated as boolean) ?? false,
@@ -172,7 +173,7 @@ export function mapCard(c: Record<string, unknown>): Card {
     updatedAt:             (c.updatedAt as string) ?? '',
     remarks: ((c.remarks as Record<string, unknown>[]) ?? []).map(r => ({
       id:                  r.id as string,
-      list:                (r.listName as ListType) ?? (r.list as ListType),
+      list:                normalizeListType(((r.listName as string) ?? (r.list as string) ?? 'Quotation')),
       type:                r.type as 'Active' | 'Pending' | 'Inactive',
       tags:                (r.tags as string[]) ?? [],
       description:         (r.description as string) ?? '',
@@ -182,7 +183,7 @@ export function mapCard(c: Record<string, unknown>): Card {
       visibleDepartments:  depIdsToNames(r.visibleDepIds as number[] | null) as import('@/types').Department[] | undefined,
     })),
     listHistory: ((c.listHistory as Record<string, unknown>[]) ?? []).map(h => ({
-      list:      (h.listName as ListType) ?? (h.list as ListType),
+      list:      normalizeListType(((h.listName as string) ?? (h.list as string) ?? 'Quotation')),
       enteredAt: (h.enteredAt as string) ?? '',
     })),
     orderConfirmationDetails: (() => {
@@ -249,7 +250,7 @@ function toCardIn(card: Card, performedBy?: number) {
     sales_person:           card.salesPerson,
     subject:                card.subject,
     project_location:       card.projectLocation,
-    list_name:              card.list,
+    list_name:              normalizeListType(card.list),
     channel_name:           card.channel ?? 'Quotation',
     approved:               card.approved ?? false,
     terminated:             card.terminated ?? false,
@@ -266,7 +267,7 @@ function toCardIn(card: Card, performedBy?: number) {
     completion_doc_url:     card.completionDocUrl ?? null,
     remarks: (card.remarks ?? []).map(r => ({
       id:                   r.id,
-      list_name:            r.list,
+      list_name:            normalizeListType(r.list),
       type:                 r.type,
       tags:                 r.tags ?? [],
       description:          r.description,
@@ -274,7 +275,7 @@ function toCardIn(card: Card, performedBy?: number) {
       visible_dep_ids:      depNamesToIds(r.visibleDepartments as string[] | undefined),
     })),
     list_history: (card.listHistory ?? []).map(h => ({
-      list_name: h.list,
+      list_name: normalizeListType(h.list),
       entered_at: h.enteredAt ?? null,
     })),
     order_confirmation_details: oc ? {

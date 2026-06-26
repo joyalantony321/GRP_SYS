@@ -24,6 +24,17 @@ from ws_manager import manager
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
+WORK_ORDER_LIST_ALIASES = {
+    "Accounts": "Approval",
+}
+
+
+def _normalize_list_name(list_name: str, channel_name: Optional[str] = None) -> str:
+    if channel_name == "Work Order":
+        return WORK_ORDER_LIST_ALIASES.get(list_name, list_name)
+    return list_name
+
+
 # ── Pydantic schemas ────────────────────────────────────────────────────────
 
 class RemarkIn(BaseModel):
@@ -125,11 +136,17 @@ def _resolve_channel(db: Session, channel_name: str) -> Channel:
 
 
 def _resolve_list(db: Session, list_name: str, channel_id: int) -> ListModel:
+    channel = db.query(Channel).filter(Channel.channel_id == channel_id).first()
+    normalized_name = _normalize_list_name(list_name, channel.channel_name if channel else None)
     lst = db.query(ListModel).filter(
-        ListModel.list_name == list_name, ListModel.channel_id == channel_id
+        ListModel.list_name == normalized_name, ListModel.channel_id == channel_id
     ).first()
+    if not lst and channel and channel.channel_name == "Work Order":
+        lst = ListModel(list_name=normalized_name, channel_id=channel_id)
+        db.add(lst)
+        db.flush()
     if not lst:
-        raise HTTPException(status_code=400, detail=f"List '{list_name}' not found in channel {channel_id}")
+        raise HTTPException(status_code=400, detail=f"List '{normalized_name}' not found in channel {channel_id}")
     return lst
 
 
@@ -198,6 +215,7 @@ def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
     }
 
 def _card_to_dict(card: Card) -> dict:
+    channel_name = card.channel_rel.channel_name if card.channel_rel else None
     return {
         "id":                   card.id,
         "quoteNumber":          card.quote_number,
@@ -209,7 +227,7 @@ def _card_to_dict(card: Card) -> dict:
         "subject":              card.subject,
         "projectLocation":      card.project_location,
         "listId":               card.list_id,
-        "listName":             card.list_rel.list_name if card.list_rel else None,
+        "listName":             _normalize_list_name(card.list_rel.list_name, channel_name) if card.list_rel else None,
         "channelId":            card.channel_id,
         "channelName":          card.channel_rel.channel_name if card.channel_rel else None,
         "approved":             card.approved,
@@ -233,7 +251,7 @@ def _card_to_dict(card: Card) -> dict:
             {
                 "id":            r.id,
                 "listId":        r.list_id,
-                "listName":      r.list_rel.list_name if r.list_rel else None,
+                "listName":      _normalize_list_name(r.list_rel.list_name, channel_name) if r.list_rel else None,
                 "type":          r.type.value if r.type else None,
                 "tags":          r.tags or [],
                 "description":   r.description,
@@ -248,7 +266,7 @@ def _card_to_dict(card: Card) -> dict:
         "listHistory": [
             {
                 "listId":    h.list_id,
-                "listName":  h.list_rel.list_name if h.list_rel else None,
+                "listName":  _normalize_list_name(h.list_rel.list_name, channel_name) if h.list_rel else None,
                 "enteredAt": h.entered_at.isoformat() if h.entered_at else None,
             }
             for h in (card.list_history or [])
