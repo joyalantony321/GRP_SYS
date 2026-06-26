@@ -315,7 +315,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
 
 interface Props {
   userName: string; userDepartment?: string; userRole: 'admin'|'user';
-  onChannelSwitch?: (ch: string) => void; accessibleChannels?: ChannelType[];
+  onChannelSwitch?: (ch: ChannelType) => void; accessibleChannels?: ChannelType[];
 }
 
 const NUM_COLS = 8;

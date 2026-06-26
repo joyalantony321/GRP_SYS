@@ -37,6 +37,7 @@ export default function Kanban() {
   const [cardsByChannel, setCardsByChannel] = useState<Record<ChannelType, Card[]>>({
     'Quotation': [],
     'Work Order': [],
+    'Schedule': [],
   });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
