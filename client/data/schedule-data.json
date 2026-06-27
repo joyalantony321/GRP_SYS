@@ -1,0 +1,202 @@
+{
+  "pending-delivery": [
+    {
+      "id": "d1782479740458-ret",
+      "woCode": "1234",
+      "listId": "pending-delivery",
+      "workers": [],
+      "isEmergency": true,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [
+        {
+          "id": "1782480933907",
+          "text": "Schedule for tommorow",
+          "author": "joyal",
+          "at": "2026-06-26T13:35:33.907Z"
+        }
+      ],
+      "createdAt": "2026-06-26T13:15:40.459Z",
+      "customer": "GRP TANKS",
+      "location": "Abu Dhabi",
+      "tankSize": "4(2+2)X3X2",
+      "contactPerson": "ANIL",
+      "phone": "0552237734",
+      "salesPerson": "Midhun",
+      "returnedFromDate": "2026-06-26"
+    },
+    {
+      "id": "d1782482459202",
+      "woCode": "1781",
+      "listId": "pending-delivery",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T14:00:59.202Z",
+      "customer": "ALQIWANI",
+      "tankSize": "4X3X2"
+    }
+  ],
+  "pending-installation": [
+    {
+      "id": "i1782481568149-ret",
+      "woCode": "1863",
+      "listId": "pending-installation",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T13:46:08.149Z",
+      "customer": "EVACUSAFE(LADIES CLUB)",
+      "location": "DUBAI",
+      "tankSize": "6.5X2X1",
+      "contactPerson": "MOHAMED",
+      "phone": "0504768577",
+      "returnedFromDate": "2026-06-26"
+    },
+    {
+      "id": "i1782482956468",
+      "woCode": "1630",
+      "listId": "pending-installation",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 30,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T14:09:16.468Z",
+      "customer": "THERMO ",
+      "location": "DUBAI",
+      "tankSize": "2X2X1 "
+    }
+  ],
+  "delivery-2026-06-27": [
+    {
+      "id": "d1782482129999",
+      "woCode": "1644",
+      "listId": "delivery-2026-06-27",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [
+        {
+          "id": "1782482165825",
+          "text": "ROOF NON INSULATED  - ONE TANK DELIVERY ONLY",
+          "author": "joyal",
+          "at": "2026-06-26T13:56:05.825Z"
+        }
+      ],
+      "createdAt": "2026-06-26T13:55:29.999Z",
+      "customer": "GRP TANK SILOS ",
+      "tankSize": "4X3X2 "
+    }
+  ],
+  "delivery-2026-06-26": [
+    {
+      "id": "d1782479804770",
+      "woCode": "1642",
+      "listId": "delivery-2026-06-26",
+      "workers": [
+        "joyal"
+      ],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": true,
+      "remarks": [],
+      "createdAt": "2026-06-26T13:16:44.770Z",
+      "customer": "ALI SHARAF",
+      "location": "WH",
+      "tankSize": "14(7+7)X5X2.5",
+      "confirmedDate": "2026-06-26"
+    }
+  ],
+  "delivery-2026-06-25": [],
+  "delivery-2026-06-29": [
+    {
+      "id": "d1782482249459",
+      "woCode": "1630",
+      "listId": "delivery-2026-06-29",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T13:57:29.459Z",
+      "customer": "THERMO",
+      "tankSize": "2X2X1"
+    }
+  ],
+  "installation-2026-06-27": [
+    {
+      "id": "i1782482842194",
+      "woCode": "2780",
+      "listId": "installation-2026-06-27",
+      "workers": [
+        "joyal",
+        "jovan"
+      ],
+      "isEmergency": true,
+      "paymentPercent": 65,
+      "isConfirmed": true,
+      "remarks": [],
+      "createdAt": "2026-06-26T14:07:22.194Z",
+      "customer": "EO",
+      "location": "DUBAI",
+      "tankSize": "2.5X2(1+1)X2-3TANKS",
+      "contactPerson": "AFRIDI",
+      "phone": "0586386084",
+      "confirmedDate": "2026-06-27",
+      "brand": "COLEX",
+      "productType": "INS",
+      "completedDate": "2026-06-27",
+      "installationStatus": "Completed"
+    }
+  ],
+  "installation-2026-06-26": [
+    {
+      "id": "i1782481105839",
+      "woCode": "1575",
+      "listId": "installation-2026-06-26",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": true,
+      "remarks": [
+        {
+          "id": "1782483514042",
+          "text": "work in progress",
+          "author": "Unknown",
+          "at": "2026-06-26T14:18:34.042Z"
+        }
+      ],
+      "createdAt": "2026-06-26T13:38:25.839Z",
+      "customer": "VANGURD",
+      "tankSize": "24(12+12)X5X4,3(1.5+1.5)X2.5X1.5",
+      "confirmedDate": "2026-06-26",
+      "delayPeriods": [
+        {
+          "startDate": "2026-06-27"
+        }
+      ]
+    }
+  ],
+  "installation-2026-06-29": [
+    {
+      "id": "i1782483003756",
+      "woCode": "1584",
+      "listId": "installation-2026-06-29",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T14:10:03.756Z",
+      "customer": "SOLARO",
+      "location": "DUBAI",
+      "tankSize": "3X3.5X1.5"
+    }
+  ]
+}
