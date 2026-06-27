@@ -37,19 +37,22 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # Add columns introduced after initial schema (idempotent)
     with engine.connect() as conn:
-        try:
-            patches = [
-                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER",
-                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(100)",
-                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
-                "ALTER TABLE remarks ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(200)",
-            ]
-            for sql in patches:
-                conn.execute(__import__('sqlalchemy').text(sql))
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        patches = [
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(100)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_company_name VARCHAR(255)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
+            "ALTER TABLE remarks ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(200)",
+        ]
+        for sql in patches:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f"[startup-migration] failed: {sql} :: {exc}")
     yield
 
 

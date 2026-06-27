@@ -120,6 +120,8 @@ CREATE TABLE cards (
     revision_number         INTEGER,
     work_order_number       VARCHAR(100),
     company_code            VARCHAR(20),
+    customer_name           VARCHAR(255),
+    customer_company_name   VARCHAR(255),
     date                    DATE         NOT NULL,
     sales_person            VARCHAR(150),
     subject                 TEXT,

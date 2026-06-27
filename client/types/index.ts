@@ -91,6 +91,8 @@ export interface Card {
   revisionNumber?: number;
   workOrderNumber?: string;
   companyCode?: string;
+  customerName?: string;
+  customerCompanyName?: string;
   purchaseOrderDocName?: string;
   purchaseOrderDocData?: string;
   purchaseOrderDocUrl?: string;
