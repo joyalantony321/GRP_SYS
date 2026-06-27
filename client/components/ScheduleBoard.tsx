@@ -10,7 +10,8 @@ import {
   ChevronDown, Check, FileText, ClipboardList, Search,
   TrendingUp, Clock, ArrowUp,
 } from 'lucide-react';
-import { ChannelType } from '@/types';
+import { Card as WorkOrderCard, ChannelType } from '@/types';
+import { fetchCards, updateCard } from '@/lib/api';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -36,6 +37,7 @@ interface ScDelayPeriod {
 
 export interface ScCard {
   id: string; woCode: string; listId: string; workers: string[];
+  sourceCardId?: string;
   isEmergency: boolean; paymentPercent: number; isConfirmed: boolean;
   confirmedDate?: string; remarks: ScRemark[]; createdAt: string;
   brand?: string; productType?: string;
@@ -73,6 +75,69 @@ const isCardDelayedOnDate = (card: ScCard, day: string) => {
 };
 
 const isCardCurrentlyDelayed = (card: ScCard) => Boolean((card.delayPeriods ?? []).some(period => !period.endDate));
+
+const flattenCards = (store: ScStore): ScCard[] => Object.values(store).flat();
+
+const toScheduleCard = (card: WorkOrderCard): ScCard => {
+  const scheduleType = card.list === 'Installation' ? 'installation' : 'delivery';
+  const woCode = (card.workOrderNumber || card.quoteNumber || '').split('/').pop() || String(card.id);
+  return {
+    id: `wo-${card.id}`,
+    sourceCardId: card.id,
+    woCode,
+    listId: `pending-${scheduleType}`,
+    workers: [],
+    isEmergency: false,
+    paymentPercent: typeof card.paymentPercent === 'number' ? card.paymentPercent : 0,
+    isConfirmed: false,
+    remarks: [],
+    createdAt: card.createdAt || new Date().toISOString(),
+    customer: card.customerName || card.customerCompanyName || undefined,
+    location: card.projectLocation || undefined,
+    salesPerson: card.salesPerson || undefined,
+    brand: card.workOrderDetails?.brand?.includes('COLEX') ? 'COLEX' : card.workOrderDetails?.brand?.includes('PIPECO') ? 'PIPPECO' : undefined,
+    productType: card.subject || undefined,
+  };
+};
+
+const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): ScStore => {
+  const next: ScStore = JSON.parse(JSON.stringify(store));
+  const flat = flattenCards(next);
+
+  const relevant = woCards.filter(c => c.list === 'Delivery' || c.list === 'Installation');
+  const relevantIds = new Set(relevant.map(c => String(c.id)));
+
+  // Remove schedule cards that are linked to WO cards no longer in Delivery/Installation
+  Object.keys(next).forEach(listId => {
+    next[listId] = (next[listId] ?? []).filter(sc => !sc.sourceCardId || relevantIds.has(String(sc.sourceCardId)));
+  });
+
+  relevant.forEach(wo => {
+    const existing = flat.find(sc => String(sc.sourceCardId) === String(wo.id));
+    const targetPending = wo.list === 'Installation' ? 'pending-installation' : 'pending-delivery';
+    if (existing) {
+      // Keep current schedule placement, but refresh mirrored core fields
+      existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : existing.paymentPercent;
+      existing.customer = wo.customerName || wo.customerCompanyName || existing.customer;
+      existing.location = wo.projectLocation || existing.location;
+      existing.salesPerson = wo.salesPerson || existing.salesPerson;
+      if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
+        const fromList = existing.listId;
+        next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
+        const moved = { ...existing, listId: targetPending };
+        if (!next[targetPending]) next[targetPending] = [];
+        next[targetPending] = [moved, ...next[targetPending]];
+      }
+      return;
+    }
+
+    const fresh = toScheduleCard(wo);
+    if (!next[fresh.listId]) next[fresh.listId] = [];
+    next[fresh.listId] = [fresh, ...next[fresh.listId]];
+  });
+
+  return next;
+};
 
 const normalizeStore = (raw: unknown): ScStore => {
   const normalized: ScStore = {
@@ -484,6 +549,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const [pendFilter, setPendFilter] = useState<'all'|'delivery'|'installation'>('all');
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
   const [woSearch, setWoSearch] = useState('');
+  const [workOrderCards, setWorkOrderCards] = useState<WorkOrderCard[]>([]);
 
   const ganttRef   = useRef<HTMLDivElement>(null);
   const delRef     = useRef<HTMLDivElement>(null);
@@ -492,15 +558,50 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const ganttAutoFitRef = useRef(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* load schedule store from JSON file via API */
+  const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard) => {
+    if (!sc.sourceCardId) return;
+    const src = workOrderCards.find(c => String(c.id) === String(sc.sourceCardId));
+    if (!src) return;
+    const updated: WorkOrderCard = {
+      ...src,
+      paymentPercent: sc.paymentPercent,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      const uid = localStorage.getItem('userId');
+      const saved = await updateCard(updated, uid ? Number(uid) : undefined);
+      setWorkOrderCards(prev => prev.map(c => String(c.id) === String(saved.id) ? saved : c));
+    } catch {
+      // Keep schedule responsive even when backend update fails temporarily.
+    }
+  }, [workOrderCards]);
+
+  const refreshFromWorkOrder = useCallback(async () => {
+    try {
+      const wo = await fetchCards('Work Order');
+      setWorkOrderCards(wo);
+      setStore(prev => mergeScheduleWithWorkOrder(prev, wo));
+    } catch {
+      // Ignore intermittent fetch failures during polling.
+    }
+  }, []);
+
+  /* load schedule store and merge with Work Order Delivery/Installation cards */
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        const res = await fetch('/api/schedule/data');
-        if (!res.ok) throw new Error(`Failed to load schedule data (${res.status})`);
-        const body = await res.json() as { store?: unknown };
-        if (active) setStore(normalizeStore(body.store));
+        const [scheduleRes, woCards] = await Promise.all([
+          fetch('/api/schedule/data'),
+          fetchCards('Work Order'),
+        ]);
+        if (!scheduleRes.ok) throw new Error(`Failed to load schedule data (${scheduleRes.status})`);
+        const body = await scheduleRes.json() as { store?: unknown };
+        const merged = mergeScheduleWithWorkOrder(normalizeStore(body.store), woCards);
+        if (active) {
+          setWorkOrderCards(woCards);
+          setStore(merged);
+        }
       } catch {
         if (active) setStore(EMPTY_STORE);
       } finally {
@@ -509,6 +610,12 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     })();
     return () => { active = false; };
   }, []);
+
+  // Keep Schedule linked with Work Order Delivery/Installation in near real-time.
+  useEffect(() => {
+    const timer = setInterval(() => { void refreshFromWorkOrder(); }, 4000);
+    return () => clearInterval(timer);
+  }, [refreshFromWorkOrder]);
 
   /* persist schedule changes to JSON file (debounced) */
   useEffect(() => {
@@ -892,7 +999,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={()=>setAddCardType('delivery')} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-50 transition-colors"><Plus className="w-3 h-3"/>Add</button>
+            <span className="text-xs font-medium text-gray-500">Sourced from Work Order</span>
             <div className="relative">
               <select value={pendFilter} onChange={e=>setPendFilter(e.target.value as typeof pendFilter)}
                 className="text-xs font-medium border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 appearance-none pr-6 cursor-pointer">
@@ -915,7 +1022,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                   <span className="text-xs font-semibold text-gray-700">{label}</span>
                   <span className="text-xs text-gray-400">({count})</span>
                 </div>
-                <button onClick={()=>setAddCardType(cat)} className="flex items-center gap-1 text-xs text-gray-500 hover:text-purple-600 transition-colors font-medium"><Plus className="w-3 h-3"/>Add</button>
+                <span className="text-xs text-gray-400">Auto</span>
               </div>
               <Droppable droppableId={lid}>
                 {(prov,snap)=>(
@@ -1013,7 +1120,10 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
       {/* Modals */}
       {addCardType&&<AddCardModal type={addCardType} onClose={()=>setAddCardType(null)} onAdd={c=>setStore(prev=>({...prev,[c.listId]:[...(prev[c.listId]??[]),c]}))}/>}
-      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} onClose={()=>setSelected(null)} onSave={(u,lid)=>setStore(prev=>({...prev,[lid]:(prev[lid]??[]).map(c=>c.id===u.id?u:c)}))}/>}
+      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
+        setStore(prev=>({...prev,[lid]:(prev[lid]??[]).map(c=>c.id===u.id?u:c)}));
+        void syncScheduleCardToWorkOrder(u);
+      }}/>} 
       {pendingDrop&&(
         <WorkersModal destId={pendingDrop.dstId}
           onConfirm={w=>{performMove(pendingDrop.srcId,pendingDrop.dstId,pendingDrop.cardId,pendingDrop.dstIdx,w);setPendingDrop(null);}}
