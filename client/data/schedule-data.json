@@ -1,6 +1,27 @@
 {
   "pending-delivery": [
     {
+      "id": "d1782482129999-ret-ret",
+      "woCode": "1644",
+      "listId": "pending-delivery",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [
+        {
+          "id": "1782482165825",
+          "text": "ROOF NON INSULATED  - ONE TANK DELIVERY ONLY",
+          "author": "joyal",
+          "at": "2026-06-26T13:56:05.825Z"
+        }
+      ],
+      "createdAt": "2026-06-26T13:55:29.999Z",
+      "customer": "GRP TANK SILOS ",
+      "tankSize": "4X3X2 ",
+      "returnedFromDate": "2026-06-30"
+    },
+    {
       "id": "d1782479740458-ret",
       "woCode": "1234",
       "listId": "pending-delivery",
@@ -72,28 +93,7 @@
       "tankSize": "2X2X1 "
     }
   ],
-  "delivery-2026-06-27": [
-    {
-      "id": "d1782482129999",
-      "woCode": "1644",
-      "listId": "delivery-2026-06-27",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 100,
-      "isConfirmed": false,
-      "remarks": [
-        {
-          "id": "1782482165825",
-          "text": "ROOF NON INSULATED  - ONE TANK DELIVERY ONLY",
-          "author": "joyal",
-          "at": "2026-06-26T13:56:05.825Z"
-        }
-      ],
-      "createdAt": "2026-06-26T13:55:29.999Z",
-      "customer": "GRP TANK SILOS ",
-      "tankSize": "4X3X2 "
-    }
-  ],
+  "delivery-2026-06-27": [],
   "delivery-2026-06-26": [
     {
       "id": "d1782479804770",
@@ -122,11 +122,12 @@
       "workers": [],
       "isEmergency": false,
       "paymentPercent": 100,
-      "isConfirmed": false,
+      "isConfirmed": true,
       "remarks": [],
       "createdAt": "2026-06-26T13:57:29.459Z",
       "customer": "THERMO",
-      "tankSize": "2X2X1"
+      "tankSize": "2X2X1",
+      "confirmedDate": "2026-06-29"
     }
   ],
   "installation-2026-06-27": [
@@ -178,9 +179,11 @@
       "confirmedDate": "2026-06-26",
       "delayPeriods": [
         {
-          "startDate": "2026-06-27"
+          "startDate": "2026-06-27",
+          "endDate": "2026-06-28"
         }
-      ]
+      ],
+      "completedDate": "2026-07-01"
     }
   ],
   "installation-2026-06-29": [
@@ -191,12 +194,14 @@
       "workers": [],
       "isEmergency": false,
       "paymentPercent": 100,
-      "isConfirmed": false,
+      "isConfirmed": true,
       "remarks": [],
       "createdAt": "2026-06-26T14:10:03.756Z",
       "customer": "SOLARO",
       "location": "DUBAI",
-      "tankSize": "3X3.5X1.5"
+      "tankSize": "3X3.5X1.5",
+      "confirmedDate": "2026-06-29"
     }
-  ]
+  ],
+  "delivery-2026-06-30": []
 }

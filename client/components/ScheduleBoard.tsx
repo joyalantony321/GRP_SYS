@@ -761,7 +761,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
               <button onClick={()=>ganttRef.current?.scrollBy({ left: -ganttDW, behavior: 'smooth' })} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronLeft className="w-3.5 h-3.5 text-gray-500"/></button>
               <button onClick={()=>ganttRef.current?.scrollBy({ left: ganttDW, behavior: 'smooth' })} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronRight className="w-3.5 h-3.5 text-gray-500"/></button>
             </div>
-            <span className="text-xs text-gray-400">Scroll left/right timeline · Ctrl+scroll zoom</span>
+            
           </div>
         </div>
         <div ref={ganttRef} className="flex-1 overflow-auto min-h-0">
@@ -783,17 +783,14 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
             {rows.length===0&&<div className="py-8 text-center text-sm text-gray-400">No installation work orders scheduled</div>}
             {rows.map(({card,dk})=>{
               const startDate=startOfDay(parseISO(card.confirmedDate || dk));
-              const dur=4;
               const endAnchor = card.completedDate ? startOfDay(parseISO(card.completedDate)) : today0;
               // 0 means today (left-most), increasing values move right into the past.
               const dayOff=differenceInCalendarDays(today0,endAnchor);
               const leftPx=dayOff*ganttDW;
               const maxRight=ganttDates.length*ganttDW;
               const clampedLeft=Math.max(0,leftPx);
-              const plannedEnd=startOfDay(addDays(startDate,dur-1));
               const isCompleted = Boolean(card.completedDate);
-              const isDelayed = !isCompleted && isBefore(plannedEnd, today0);
-              const progressedDays=Math.max(1, Math.min(dur, differenceInCalendarDays(endAnchor,startDate)+1));
+              const progressedDays=Math.max(1, differenceInCalendarDays(endAnchor,startDate)+1);
               const rawWidth=progressedDays*ganttDW;
               const clampedWidth=Math.max(0,Math.min(rawWidth,maxRight-clampedLeft));
               const outerBorder=card.isEmergency?'#dc2626':'#4b5563';
