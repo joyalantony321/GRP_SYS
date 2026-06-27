@@ -45,19 +45,19 @@ export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
 // Admin always sees all lists. undefined = no access to that channel.
 export const DEPARTMENT_LISTS: Record<Department, Partial<Record<ChannelType, ListType[]>>> = {
   'Quotation': {
-    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Technical': {
-    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Accounts': {
-    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Delivery & Installation': {
-    'Quotation': ['Submittal', 'Review', 'LPO'],
+    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
 };
