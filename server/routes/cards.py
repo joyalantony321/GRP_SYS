@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from datetime import date as date_type, datetime, timezone
 from typing import Any, Optional, List
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -102,6 +103,8 @@ class CardIn(BaseModel):
     revision_number: Optional[int] = None
     work_order_number: Optional[str] = None
     company_code: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_company_name: Optional[str] = None
     date: str                                      # yyyy-MM-dd string
     sales_person: Optional[str] = None
     subject: Optional[str] = None
@@ -165,6 +168,13 @@ def _clamp_payment_percent(v: Optional[int]) -> int:
     return max(0, min(100, n))
 
 
+def _unique_remark_id(db: Session, proposed_id: str) -> str:
+    rid = proposed_id
+    while db.query(Remark).filter(Remark.id == rid).first() is not None:
+        rid = f"{proposed_id}-{uuid4().hex[:8]}"
+    return rid
+
+
 # ── Output helpers ───────────────────────────────────────────────────────────
 
 def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
@@ -222,6 +232,8 @@ def _card_to_dict(card: Card) -> dict:
         "revisionNumber":       card.revision_number,
         "workOrderNumber":      card.work_order_number,
         "companyCode":          card.company_code,
+        "customerName":         card.customer_name,
+        "customerCompanyName":  card.customer_company_name,
         "date":                 card.date.isoformat() if isinstance(card.date, date_type) else card.date,
         "salesPerson":          card.sales_person,
         "subject":              card.subject,
@@ -319,6 +331,8 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
         revision_number=card_in.revision_number,
         work_order_number=card_in.work_order_number,
         company_code=card_in.company_code,
+        customer_name=card_in.customer_name,
+        customer_company_name=card_in.customer_company_name,
         date=card_date,
         sales_person=card_in.sales_person,
         subject=card_in.subject,
@@ -345,8 +359,9 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
     for r in card_in.remarks:
         r_list = _resolve_list(db, r.list_name, ch.channel_id)
         r_uid  = _resolve_user_id(db, r.created_by_username)
+        rid = _unique_remark_id(db, r.id)
         db.add(Remark(
-            id=r.id, card_id=card.id, list_id=r_list.list_id,
+            id=rid, card_id=card.id, list_id=r_list.list_id,
             type=StageType(r.type), tags=r.tags or None,
             description=r.description, created_by=r_uid,
             created_by_name=r.created_by_username if r_uid is None else None,
@@ -396,6 +411,8 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
     card.revision_number         = card_in.revision_number
     card.work_order_number       = card_in.work_order_number
     card.company_code            = card_in.company_code
+    card.customer_name           = card_in.customer_name
+    card.customer_company_name   = card_in.customer_company_name
     card.date                    = card_date
     card.sales_person            = card_in.sales_person
     card.subject                 = card_in.subject
@@ -427,8 +444,9 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
         for r in card_in.remarks:
             r_list = _resolve_list(db, r.list_name, ch.channel_id)
             r_uid  = _resolve_user_id(db, r.created_by_username)
+            rid = _unique_remark_id(db, r.id)
             db.add(Remark(
-                id=r.id, card_id=card.id, list_id=r_list.list_id,
+                id=rid, card_id=card.id, list_id=r_list.list_id,
                 type=StageType(r.type), tags=r.tags or None,
                 description=r.description, created_by=r_uid,
                 created_by_name=r.created_by_username if r_uid is None else None,
@@ -479,8 +497,9 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
                 existing.created_by_name = r.created_by_username if r_uid is None else None
                 existing.visible_dep_ids = r.visible_dep_ids or None
             else:
+                rid = _unique_remark_id(db, r.id)
                 db.add(Remark(
-                    id=r.id, card_id=card.id, list_id=r_list.list_id,
+                    id=rid, card_id=card.id, list_id=r_list.list_id,
                     type=StageType(r.type), tags=r.tags or None,
                     description=r.description, created_by=r_uid,
                     created_by_name=r.created_by_username if r_uid is None else None,

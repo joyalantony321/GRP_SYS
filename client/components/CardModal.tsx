@@ -37,6 +37,11 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   const [showOCForm, setShowOCForm] = useState(false);
   const [docUploading, setDocUploading] = useState<Record<string, boolean>>({});
 
+  const quotationHistoryLists: ListType[] = ['Quotation', 'Submittal', 'Review', 'LPO'];
+  const workOrderHistoryLists = lists.filter(l => !quotationHistoryLists.includes(l));
+  const selectableRemarkLists = channel === 'Work Order' ? workOrderHistoryLists : lists;
+  const isReadOnlyQuotationHistoryList = (list: ListType) => channel === 'Work Order' && quotationHistoryLists.includes(list);
+
   useEffect(() => {
     setEditedCard(card);
   }, [card]);
@@ -104,6 +109,10 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     setIsEditing(false);
   };
 
+  const handleCloseModal = () => {
+    onClose();
+  };
+
   const handleAddRemark = () => {
     const newRemarks = selectedLists.map(list => ({
       id: `${Date.now()}-${list}`,
@@ -126,7 +135,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     onUpdate(updatedCard);
     setEditedCard(updatedCard);
     setShowAddRemark(false);
-    setSelectedLists([editedCard.list]);
+    setSelectedLists([selectableRemarkLists[0] ?? editedCard.list]);
     setRemarkType('Active');
     setRemarkTags('');
     setRemarkDescription('');
@@ -200,7 +209,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">Card Details</h2>
           <button
-            onClick={onClose}
+            onClick={handleCloseModal}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 text-gray-500" />
@@ -312,7 +321,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
               {/* ── Meta strip: Date · Sales Person (+ List in edit) ── */}
               <div className={`px-4 border-b border-gray-100 ${isEditing ? 'py-3 bg-white' : 'py-2 bg-gray-50'}`}>
                 {isEditing ? (
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Date</label>
                       <input
@@ -328,6 +337,24 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         type="text"
                         value={editedCard.salesPerson}
                         onChange={(e) => setEditedCard({ ...editedCard, salesPerson: e.target.value })}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Customer Name</label>
+                      <input
+                        type="text"
+                        value={editedCard.customerName || ''}
+                        onChange={(e) => setEditedCard({ ...editedCard, customerName: e.target.value })}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Customer Company Name</label>
+                      <input
+                        type="text"
+                        value={editedCard.customerCompanyName || ''}
+                        onChange={(e) => setEditedCard({ ...editedCard, customerCompanyName: e.target.value })}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                       />
                     </div>
@@ -354,6 +381,16 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                     <div className="flex items-center gap-1.5">
                       <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide">By</span>
                       <span className="text-gray-700 font-medium">{card.salesPerson}</span>
+                    </div>
+                    <span className="text-gray-300 select-none">·</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide">Customer</span>
+                      <span className="text-gray-700 font-medium">{card.customerName || '-'}</span>
+                    </div>
+                    <span className="text-gray-300 select-none">·</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-400 text-xs font-semibold uppercase tracking-wide">Company</span>
+                      <span className="text-gray-700 font-medium">{card.customerCompanyName || '-'}</span>
                     </div>
                   </div>
                 )}
@@ -665,7 +702,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       Select Lists (Check to add remark to multiple lists)
                     </label>
                     <div className="grid grid-cols-4 gap-3">
-                      {lists.map(list => (
+                      {selectableRemarkLists.map(list => (
                         <label
                           key={list}
                           className={`flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${
@@ -778,7 +815,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         setRemarkType('Active');
                         setRemarkTags('');
                         setRemarkDescription('');
-                        setSelectedLists([card.list]);
+                        setSelectedLists([selectableRemarkLists[0] ?? card.list]);
                         setVisibleDepartments(channelDepts);
                       }}
                       className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
@@ -789,8 +826,19 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                 </div>
               )}
 
+              {channel === 'Work Order' && (
+                <div className="space-y-2 mb-4">
+                  <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold tracking-wide">
+                    QUOTATION HISTORY (Read Only)
+                  </div>
+                  <div className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-xs font-semibold tracking-wide">
+                    WORK ORDER HISTORY
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4">
-                {lists.map(list => {
+                {(channel === 'Work Order' ? [...quotationHistoryLists, ...workOrderHistoryLists] : lists).map(list => {
                   const allListRemarks = editedCard.remarks.filter(r => r.list === list);
 
                   // Filter remarks by department visibility for non-admin users
@@ -804,7 +852,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                   return (
                     <div key={list} className="border border-gray-200 rounded-lg overflow-hidden">
                       <div className="bg-gray-100 px-4 py-2 flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-700">{list}</h4>
+                        <h4 className="font-semibold text-gray-700">
+                          {list}
+                          {isReadOnlyQuotationHistoryList(list) && (
+                            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                              Read Only
+                            </span>
+                          )}
+                        </h4>
                         <span className="text-sm text-gray-500">
                           {userRole === 'admin' && allListRemarks.length !== listRemarks.length
                             ? `${listRemarks.length} visible / ${allListRemarks.length} total`
@@ -932,7 +987,8 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                                       {(userRole === 'admin' ||
                                         (userRole === 'user' &&
                                           remark.createdBy === 'user')) &&
-                                        userRole === 'admin' && (
+                                        userRole === 'admin' &&
+                                        !isReadOnlyQuotationHistoryList(remark.list) && (
                                           <>
                                             <button
                                               onClick={() => {

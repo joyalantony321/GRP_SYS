@@ -205,6 +205,23 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     }];
   };
 
+  const cardMatchesSearch = (card: CardType, term: string): boolean => {
+    const q = term.trim().toLowerCase();
+    if (!q) return true;
+
+    const fields = [
+      card.quoteNumber,
+      card.workOrderNumber,
+      card.customerName,
+      card.customerCompanyName,
+      card.projectLocation,
+      card.salesPerson,
+      card.date,
+    ];
+
+    return fields.some(v => (v ?? '').toString().toLowerCase().includes(q));
+  };
+
   const filteredCards = useMemo(() => {
     let filtered = cards;
 
@@ -294,9 +311,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     }
 
     if (quoteSearch) {
-      filtered = filtered.filter(card =>
-        card.quoteNumber.toLowerCase().includes(quoteSearch.toLowerCase())
-      );
+      filtered = filtered.filter(card => cardMatchesSearch(card, quoteSearch));
     }
 
     return filtered;
@@ -351,6 +366,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       id: Date.now().toString(),
       quoteNumber: `NEW/${new Date().getFullYear()}/${Math.floor(Math.random() * 10000)}`,
       workOrderNumber: undefined,
+      customerName: '',
+      customerCompanyName: '',
       date: new Date().toISOString().split('T')[0],
       salesPerson: '',
       subject: '',
@@ -395,6 +412,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       id: Date.now().toString(),
       quoteNumber: '',
       workOrderNumber: woPreCreate.woNumber.trim(),
+      customerName: '',
+      customerCompanyName: '',
       date: new Date().toISOString().split('T')[0],
       salesPerson: '',
       subject: '',
@@ -507,6 +526,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         return knownCodes.includes(firstSegment) ? firstSegment : (card.companyCode || 'GRP');
       })();
       const now = new Date().toISOString();
+      const cloneSeed = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const clone: CardType = {
         ...card,
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -518,7 +538,11 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         companyCode: resolvedCode,
         assignedTo: assigneeName,
         userWorkStatus: assigneeName ? 'Assigned' : undefined,
-        remarks: [],
+        // Preserve quotation remarks as immutable history in the WO card.
+        remarks: (card.remarks ?? []).map((r, idx) => ({
+          ...r,
+          id: `${cloneSeed}-${idx}-${r.list}`,
+        })),
         assignmentHistory: assigneeName
           ? [...(card.assignmentHistory ?? []), { assignedTo: assigneeName, assignedAt: now, assignedBy: userName }]
           : (card.assignmentHistory ?? []),
@@ -565,35 +589,19 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const newQuoteNumber = `${baseQuote}/R${revNum}`;
     const now = new Date().toISOString();
     const revisedHistory = appendActionHistory(card, 'Revised', now);
-    setCards(cards.map(c => c.id === cardId ? { ...c, assignmentHistory: revisedHistory, updatedAt: now } : c));
-    const clone: CardType = {
+    const revisedCard: CardType = {
       ...card,
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       quoteNumber: newQuoteNumber,
       revisionNumber: revNum,
-      list: 'Quotation',
-      channel: 'Quotation',
       approved: false,
       terminated: false,
-      assignedTo: undefined,
-      userWorkStatus: undefined,
-      purchaseOrderDocName: undefined,
-      purchaseOrderDocData: undefined,
-      purchaseOrderDocUrl: undefined,
-      quotationDocName: undefined,
-      quotationDocData: undefined,
-      quotationDocUrl: undefined,
-      completionDocName: undefined,
-      completionDocData: undefined,
-      completionDocUrl: undefined,
-      completedAt: undefined,
-      remarks: [],
       assignmentHistory: revisedHistory,
-      listHistory: [{ list: 'Quotation' as ListType, enteredAt: now }],
-      createdAt: now,
       updatedAt: now,
     };
-    onCreateInChannel('Quotation', clone);
+    setCards(cards.map(c => c.id === cardId ? revisedCard : c));
+    if (selectedCard?.id === cardId) {
+      setSelectedCard(revisedCard);
+    }
   };
 
   const handleAssignUser = (cardId: string, assigneeName: string | undefined) => {
@@ -701,7 +709,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search Cards"
+                  placeholder="Search quote, WO, customer, location, sales, date"
                   value={quoteSearch}
                   onChange={(e) => setQuoteSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent"
@@ -1103,7 +1111,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 <Search className="w-4 h-4 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search cards..."
+                  placeholder="Search quote, WO, customer, location, sales, date"
                   value={cardSearch}
                   onChange={(e) => setCardSearch(e.target.value)}
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-pink-500"
@@ -1111,7 +1119,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               </div>
               <div className="mt-3 text-sm text-gray-500">
                 Showing {filteredCards.filter(card => 
-                  cardSearch ? card.quoteNumber.toLowerCase().includes(cardSearch.toLowerCase()) : true
+                  cardMatchesSearch(card, cardSearch)
                 ).length} of {filteredCards.length} cards
               </div>
             </div>
@@ -1137,7 +1145,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredCards
-                    .filter(card => cardSearch ? card.quoteNumber.toLowerCase().includes(cardSearch.toLowerCase()) : true)
+                    .filter(card => cardMatchesSearch(card, cardSearch))
                     .map(card => {
                       const latestRemark = card.remarks.length > 0 ? card.remarks[card.remarks.length - 1] : null;
                       const remarkType = latestRemark?.type;
@@ -1490,7 +1498,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-indigo-600 to-indigo-500 rounded-t-2xl">
                 <div>
                   <h2 className="text-base font-bold text-white">Revise Quotation</h2>
-                  <p className="text-indigo-100 text-xs mt-0.5">Enter a revision number to create a new revised card</p>
+                  <p className="text-indigo-100 text-xs mt-0.5">Enter a revision number to update this card in place</p>
                 </div>
                 <button onClick={() => setRevisionPending(null)} className="p-1.5 rounded-lg hover:bg-indigo-500 transition-colors">
                   <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -1544,7 +1552,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                       : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  Create Revision
+                  Apply Revision
                 </button>
               </div>
             </div>
