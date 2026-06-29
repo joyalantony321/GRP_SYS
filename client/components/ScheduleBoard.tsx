@@ -10,7 +10,7 @@ import {
   ChevronDown, Check, FileText, ClipboardList, Search,
   TrendingUp, Clock, ArrowUp,
 } from 'lucide-react';
-import { Card as WorkOrderCard, ChannelType } from '@/types';
+import { Card as WorkOrderCard, ChannelType, ScheduleStage } from '@/types';
 import { fetchCards, updateCard } from '@/lib/api';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -38,6 +38,7 @@ interface ScDelayPeriod {
 export interface ScCard {
   id: string; woCode: string; listId: string; workers: string[];
   sourceCardId?: string;
+  scheduleType?: 'Delivery' | 'Installation';
   isEmergency: boolean; paymentPercent: number; isConfirmed: boolean;
   confirmedDate?: string; remarks: ScRemark[]; createdAt: string;
   brand?: string; productType?: string;
@@ -61,6 +62,23 @@ const GANTT_MIN_DAY_WIDTH = 36;
 const GANTT_MAX_DAY_WIDTH = 160;
 const BRAND_OPTIONS = ['COLEX', 'PIPPECO'] as const;
 
+const normalizeBrand = (brand?: string): string | undefined => {
+  if (!brand) return undefined;
+  const upper = brand.toUpperCase();
+  if (upper.includes('COLEX')) return 'COLEX';
+  if (upper.includes('PIPECO') || upper.includes('PIPPECO')) return 'PIPPECO';
+  return brand;
+};
+
+const deriveProductType = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return card.subject || undefined;
+  if (details.typeInsulated && details.typeNonInsulated) return 'Insulated / Non-Insulated';
+  if (details.typeInsulated) return 'Insulated';
+  if (details.typeNonInsulated) return 'Non-Insulated';
+  return card.subject || details.jobDescription || undefined;
+};
+
 const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
 
 const isCardDelayedOnDate = (card: ScCard, day: string) => {
@@ -78,14 +96,61 @@ const isCardCurrentlyDelayed = (card: ScCard) => Boolean((card.delayPeriods ?? [
 
 const flattenCards = (store: ScStore): ScCard[] => Object.values(store).flat();
 
+const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
+  if (listId === 'pending-delivery') return 'Pending delivery';
+  if (listId === 'pending-installation') return 'Pending installation';
+
+  const dayLabel = listId.replace(/^(delivery|installation)-/, '');
+  const isDelivery = listId.startsWith('delivery-') || (card.scheduleType ?? 'Delivery') === 'Delivery';
+  const isInstallation = listId.startsWith('installation-') || (card.scheduleType ?? 'Delivery') === 'Installation';
+
+  if (isDelivery) {
+    return card.isConfirmed ? 'Delivery completed' : 'Delivery scheduled';
+  }
+
+  if (isInstallation) {
+    if (card.completedDate) return 'Installation completed';
+    if (!card.isConfirmed) return 'Installation scheduled';
+    return card.confirmedDate && card.confirmedDate === dayLabel ? 'Installation started' : 'Installation in progress';
+  }
+
+  return card.scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery';
+};
+
+const sortScheduleGroup = (cards: ScCard[]) => {
+  const entryTime = (card: ScCard) => Date.parse(card.returnedFromDate || card.confirmedDate || card.createdAt || '') || 0;
+  return [...cards].sort((left, right) => {
+    if (left.isEmergency !== right.isEmergency) return left.isEmergency ? -1 : 1;
+    const timeDiff = entryTime(left) - entryTime(right);
+    if (timeDiff !== 0) return timeDiff;
+    return left.woCode.localeCompare(right.woCode);
+  });
+};
+
+const inferScheduleTypeFromWorkOrder = (card: WorkOrderCard): 'Delivery' | 'Installation' => {
+  if (card.scheduleType === 'Installation' || card.list === 'Installation') return 'Installation';
+  if (card.scheduleType === 'Delivery' || card.list === 'Delivery') return 'Delivery';
+  const stage = (card.scheduleStage ?? '').toLowerCase();
+  if (stage.includes('installation')) return 'Installation';
+  return 'Delivery';
+};
+
+const hasExplicitScheduleMetadata = (card: WorkOrderCard): boolean => {
+  if (card.scheduleType === 'Delivery' || card.scheduleType === 'Installation') return true;
+  const stage = (card.scheduleStage ?? '').toLowerCase();
+  return stage.includes('delivery') || stage.includes('installation');
+};
+
 const toScheduleCard = (card: WorkOrderCard): ScCard => {
-  const scheduleType = card.list === 'Installation' ? 'installation' : 'delivery';
+  const scheduleType = inferScheduleTypeFromWorkOrder(card);
   const woCode = (card.workOrderNumber || card.quoteNumber || '').split('/').pop() || String(card.id);
+  const details = card.workOrderDetails;
   return {
     id: `wo-${card.id}`,
     sourceCardId: card.id,
     woCode,
-    listId: `pending-${scheduleType}`,
+    scheduleType,
+    listId: scheduleType === 'Installation' ? 'pending-installation' : 'pending-delivery',
     workers: [],
     isEmergency: false,
     paymentPercent: typeof card.paymentPercent === 'number' ? card.paymentPercent : 0,
@@ -95,8 +160,8 @@ const toScheduleCard = (card: WorkOrderCard): ScCard => {
     customer: card.customerName || card.customerCompanyName || undefined,
     location: card.projectLocation || undefined,
     salesPerson: card.salesPerson || undefined,
-    brand: card.workOrderDetails?.brand?.includes('COLEX') ? 'COLEX' : card.workOrderDetails?.brand?.includes('PIPECO') ? 'PIPPECO' : undefined,
-    productType: card.subject || undefined,
+    brand: normalizeBrand(details?.brand),
+    productType: deriveProductType(card),
   };
 };
 
@@ -104,7 +169,7 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
   const next: ScStore = JSON.parse(JSON.stringify(store));
   const flat = flattenCards(next);
 
-  const relevant = woCards.filter(c => c.list === 'Delivery' || c.list === 'Installation');
+  const relevant = woCards.filter(c => c.list === 'Schedule' || c.list === 'Delivery' || c.list === 'Installation');
   const relevantIds = new Set(relevant.map(c => String(c.id)));
 
   // Remove schedule cards that are linked to WO cards no longer in Delivery/Installation
@@ -114,20 +179,37 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
 
   relevant.forEach(wo => {
     const existing = flat.find(sc => String(sc.sourceCardId) === String(wo.id));
-    const targetPending = wo.list === 'Installation' ? 'pending-installation' : 'pending-delivery';
+    const explicitSchedule = hasExplicitScheduleMetadata(wo);
+    const inferredType = inferScheduleTypeFromWorkOrder(wo);
+    const targetPending = inferredType === 'Installation' ? 'pending-installation' : 'pending-delivery';
     if (existing) {
       // Keep current schedule placement, but refresh mirrored core fields
       existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : existing.paymentPercent;
       existing.customer = wo.customerName || wo.customerCompanyName || existing.customer;
       existing.location = wo.projectLocation || existing.location;
       existing.salesPerson = wo.salesPerson || existing.salesPerson;
-      if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
-        const fromList = existing.listId;
-        next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
-        const moved = { ...existing, listId: targetPending };
-        if (!next[targetPending]) next[targetPending] = [];
-        next[targetPending] = [moved, ...next[targetPending]];
+      existing.brand = normalizeBrand(wo.workOrderDetails?.brand) || existing.brand;
+      existing.productType = deriveProductType(wo) || existing.productType;
+      if (explicitSchedule) {
+        // Work Order has explicit type — enforce it
+        existing.scheduleType = inferredType;
+        if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
+          const fromList = existing.listId;
+          next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
+          const moved = { ...existing, scheduleType: inferredType, listId: targetPending };
+          if (!next[targetPending]) next[targetPending] = [];
+          next[targetPending] = [moved, ...next[targetPending]];
+        }
+      } else {
+        // Work Order has no explicit type — preserve whatever type/list the Schedule card already has
+        // (the user may have set it via the WO pending-choice dialog but the DB hasn't been polled yet)
       }
+      return;
+    }
+
+    // For cards parked in Work Order->Schedule without an explicit schedule classification,
+    // do not auto-create a Schedule channel shadow card.
+    if (wo.list === 'Schedule' && !explicitSchedule) {
       return;
     }
 
@@ -341,6 +423,32 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
   const isDelayedNow = isCardCurrentlyDelayed(ec);
   const dk = isDateList ? listId.replace(/^(delivery|installation)-/,'') : null;
   const isTodayCol = dk ? isToday(parseISO(dk)) : false;
+  const stageText = getScheduleStage(ec, listId);
+  const deliveryDate = listId.startsWith('delivery-')
+    ? listId.replace(/^delivery-/, '')
+    : (ec.scheduleType === 'Delivery' ? (ec.confirmedDate || '-') : '-');
+  const deliveryStatus = ec.scheduleType === 'Delivery'
+    ? (ec.isConfirmed ? 'Completed' : (listId.startsWith('delivery-') ? 'Scheduled' : 'Pending'))
+    : '-';
+  const deliveryCompletedDate = ec.scheduleType === 'Delivery' && ec.isConfirmed
+    ? (ec.confirmedDate || '-')
+    : '-';
+  const latestRemark = ec.remarks.length > 0 ? ec.remarks[ec.remarks.length - 1].text : '-';
+  const detailRows = [
+    { label: 'W.O.NO.', value: ec.woCode || '-' },
+    { label: 'CUSTOMER', value: ec.customer || '-' },
+    { label: 'TANK SIZE', value: ec.tankSize || '-' },
+    { label: 'BRAND', value: ec.brand || '-' },
+    { label: 'TYPE', value: ec.productType || '-' },
+    { label: 'LOCATION', value: ec.location || '-' },
+    { label: 'DEL. DATE', value: deliveryDate || '-' },
+    { label: 'DEL. STATUS', value: deliveryStatus },
+    { label: 'DEL. COMP. DATE', value: deliveryCompletedDate },
+    { label: 'CONTACT PERSON', value: ec.contactPerson || '-' },
+    { label: 'PHONE NUMBER', value: ec.phone || '-' },
+    { label: 'SALES PERSON', value: ec.salesPerson || '-' },
+    { label: 'REMARKS', value: latestRemark || '-' },
+  ];
   const addWorker = () => {
     const w = workerInput.trim();
     if (!w) return;
@@ -367,38 +475,46 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{maxHeight:'88vh'}}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 min-w-0">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white ${ec.isEmergency?'bg-red-500':'bg-purple-600'}`}>{ec.woCode}</div>
-            <div><h2 className="text-base font-semibold text-gray-900">{ec.customer||`WO-${ec.woCode}`}</h2>
-              {ec.location&&<p className="text-sm text-gray-500">{ec.location}{ec.tankSize?` · ${ec.tankSize}`:''}</p>}</div>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-gray-900 truncate">{ec.customer||`WO-${ec.woCode}`}</h2>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700">{stageText}</span>
+                {ec.brand && <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700">Brand: {ec.brand}</span>}
+                {ec.productType && <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700">Type: {ec.productType}</span>}
+              </div>
+              {ec.location&&<p className="text-sm text-gray-500 mt-1 truncate">{ec.location}{ec.tankSize?` · ${ec.tankSize}`:''}</p>}
+            </div>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-500"/></button>
+          <div className="flex items-center gap-2 pl-3">
+            <button
+              onClick={() => setEc(p => ({ ...p, isEmergency: !p.isEmergency }))}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${ec.isEmergency ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {ec.isEmergency ? 'Emergency ON' : 'Emergency'}
+            </button>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-500"/></button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4">
-          {(ec.contactPerson||ec.phone||ec.salesPerson||ec.workers.length>0)&&(
-            <div className="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
-              {ec.contactPerson&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Contact</div><div className="text-sm font-semibold text-gray-800 mt-0.5">{ec.contactPerson}</div></div>}
-              {ec.phone&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Phone</div><div className="text-sm font-semibold text-gray-800 mt-0.5">{ec.phone}</div></div>}
-              {ec.salesPerson&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Sales</div><div className="text-sm font-semibold text-gray-800 mt-0.5">{ec.salesPerson}</div></div>}
-              {ec.brand&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Brand</div><div className="text-sm font-semibold text-gray-800 mt-0.5">{ec.brand}</div></div>}
-              {ec.productType&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Type</div><div className="text-sm font-semibold text-gray-800 mt-0.5">{ec.productType}</div></div>}
-              {ec.workers.length>0&&<div><div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Workers</div><div className="text-sm text-gray-800 mt-0.5">{ec.workers.join(', ')}</div></div>}
-            </div>)}
-          <div className="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
-            <div><label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Brand</label>
-              <select value={ec.brand||''} onChange={e=>setEc(p=>({...p,brand:e.target.value||undefined}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
-                <option value="">Select brand</option>
-                {BRAND_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
-              </select></div>
-            <div><label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Type</label>
-              <input value={ec.productType||''} onChange={e=>setEc(p=>({...p,productType:e.target.value||undefined}))} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"/></div>
+          <div className="p-4 rounded-xl border border-yellow-300 bg-yellow-50">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {detailRows.map((row) => (
+                <div key={row.label} className="rounded-lg border border-yellow-200 bg-white px-3 py-2">
+                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{row.label}</div>
+                  <div className="text-sm font-semibold text-gray-800 mt-0.5 break-words">{row.value}</div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className={`flex items-center justify-between px-4 py-3 rounded-xl border ${ec.isEmergency?'border-red-200 bg-red-50':'border-gray-200 bg-gray-50'}`}>
-            <div className="flex items-center gap-3"><AlertTriangle className={`w-4 h-4 ${ec.isEmergency?'text-red-500':'text-gray-400'}`}/>
-              <span className={`text-sm font-semibold ${ec.isEmergency?'text-red-700':'text-gray-700'}`}>Emergency {ec.isEmergency?'(ON)':'(OFF)'}</span></div>
-            <button onClick={()=>setEc(p=>({...p,isEmergency:!p.isEmergency}))} className={`relative w-10 h-6 rounded-full transition-colors ${ec.isEmergency?'bg-red-500':'bg-gray-300'}`}>
-              <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${ec.isEmergency?'left-5':'left-1'}`}/></button>
-          </div>
+          {ec.workers.length>0&&(
+            <div className="p-4 rounded-xl border border-gray-200 bg-gray-50">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Workers</div>
+              <div className="text-sm text-gray-800 mt-1">{ec.workers.join(', ')}</div>
+            </div>
+          )}
           <div className="p-4 rounded-xl border border-gray-200" style={{backgroundColor:pBg(ec.paymentPercent)}}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-semibold text-gray-700">Payment Received</span>
@@ -557,24 +673,67 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const chDropRef  = useRef<HTMLDivElement>(null);
   const ganttAutoFitRef = useRef(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workOrderCardsRef = useRef<WorkOrderCard[]>([]);
+  const syncedSignatureRef = useRef<Record<string, string>>({});
+
+  const getSyncSignature = (sc: ScCard) => {
+    // scheduleType intentionally excluded — Work Order is the authority for type;
+    // we only sync stage/payment/confirmation status back.
+    return [
+      sc.listId,
+      sc.paymentPercent,
+      sc.isConfirmed ? '1' : '0',
+      sc.confirmedDate ?? '',
+      sc.completedDate ?? '',
+      sc.returnedFromDate ?? '',
+      sc.installationStatus ?? '',
+    ].join('|');
+  };
+
+  useEffect(() => {
+    workOrderCardsRef.current = workOrderCards;
+  }, [workOrderCards]);
 
   const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard) => {
     if (!sc.sourceCardId) return;
-    const src = workOrderCards.find(c => String(c.id) === String(sc.sourceCardId));
+    let src = workOrderCardsRef.current.find(c => String(c.id) === String(sc.sourceCardId));
+    if (!src) {
+      try {
+        const latest = await fetchCards('Work Order');
+        setWorkOrderCards(latest);
+        workOrderCardsRef.current = latest;
+        src = latest.find(c => String(c.id) === String(sc.sourceCardId));
+      } catch {
+        return;
+      }
+    }
     if (!src) return;
+    const scheduleStage = getScheduleStage(sc, sc.listId);
+    const srcStage = src.scheduleStage;
+    const srcPayment = typeof src.paymentPercent === 'number' ? src.paymentPercent : 0;
+    if (srcPayment === sc.paymentPercent && srcStage === scheduleStage) {
+      return;
+    }
+    // IMPORTANT: Do NOT sync scheduleType back to Work Order.
+    // Work Order is the authority for scheduleType; Schedule channel only reports stage.
     const updated: WorkOrderCard = {
       ...src,
       paymentPercent: sc.paymentPercent,
+      scheduleStage,
       updatedAt: new Date().toISOString(),
     };
     try {
       const uid = localStorage.getItem('userId');
       const saved = await updateCard(updated, uid ? Number(uid) : undefined);
-      setWorkOrderCards(prev => prev.map(c => String(c.id) === String(saved.id) ? saved : c));
+      setWorkOrderCards(prev => {
+        const next = prev.map(c => String(c.id) === String(saved.id) ? saved : c);
+        workOrderCardsRef.current = next;
+        return next;
+      });
     } catch {
       // Keep schedule responsive even when backend update fails temporarily.
     }
-  }, [workOrderCards]);
+  }, []);
 
   const refreshFromWorkOrder = useCallback(async () => {
     try {
@@ -669,6 +828,26 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     });
   },[scheduleLoaded]);
 
+  // Keep Work Order Schedule cards in sync for Schedule-side changes only.
+  useEffect(() => {
+    if (!scheduleLoaded) return;
+    const linkedCards = flattenCards(store).filter(sc => !!sc.sourceCardId);
+    if (linkedCards.length === 0) return;
+
+    linkedCards.forEach(sc => {
+      const key = String(sc.sourceCardId);
+      const sig = getSyncSignature(sc);
+      if (syncedSignatureRef.current[key] === sig) return;
+      syncedSignatureRef.current[key] = sig;
+      void syncScheduleCardToWorkOrder(sc);
+    });
+
+    const activeIds = new Set(linkedCards.map(sc => String(sc.sourceCardId)));
+    Object.keys(syncedSignatureRef.current).forEach(key => {
+      if (!activeIds.has(key)) delete syncedSignatureRef.current[key];
+    });
+  }, [store, scheduleLoaded, syncScheduleCardToWorkOrder]);
+
   /* horizontal wheel for date grids only */
   useEffect(()=>{
     const el=delRef.current; if(!el)return;
@@ -709,14 +888,18 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
   /* DnD helpers */
   const performMove=useCallback((srcId:string,dstId:string,cardId:string,dstIdx:number,workers?:string[])=>{
+    let movedForSync: ScCard | null = null;
     setStore(prev=>{
       const next={...prev}; const srcList=[...(next[srcId]??[])]; const card=srcList.find(c=>c.id===cardId);
       if(!card)return prev;
       next[srcId]=srcList.filter(c=>c.id!==cardId);
-      const dstList=[...(next[dstId]??[])]; dstList.splice(dstIdx,0,{...card,listId:dstId,workers:workers??card.workers});
+      const moved = {...card,listId:dstId,workers:workers??card.workers};
+      movedForSync = moved;
+      const dstList=[...(next[dstId]??[])]; dstList.splice(dstIdx,0,moved);
       next[dstId]=dstList; return next;
     });
-  },[]);
+    if (movedForSync) void syncScheduleCardToWorkOrder(movedForSync);
+  },[syncScheduleCardToWorkOrder]);
 
   const onDragEnd=useCallback((result:DropResult)=>{
     const{destination,source,draggableId}=result;
@@ -981,8 +1164,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   /* ── Pending ─────────────────────────────────────────────────────────── */
 
   const renderPending=()=>{
-    const delCards=getCards('pending-delivery').filter(matchesWo);
-    const instCards=getCards('pending-installation').filter(matchesWo);
+    const delCards=sortScheduleGroup(getCards('pending-delivery').filter(matchesWo));
+    const instCards=sortScheduleGroup(getCards('pending-installation').filter(matchesWo));
     const cols=[
       {lid:'pending-delivery',   label:'Delivery',     count:delCards.length,   Icon:Truck,  cards:delCards,  cat:'delivery'  as const},
       {lid:'pending-installation',label:'Installation', count:instCards.length,  Icon:Wrench, cards:instCards, cat:'installation' as const},

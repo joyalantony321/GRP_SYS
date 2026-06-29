@@ -17,6 +17,7 @@ interface Props {
   onUpdateCard?: (card: CardType) => void;
   onAssignUser?: (cardId: string, userName: string | undefined) => void;
   onUpdateWorkStatus?: (cardId: string, status: UserWorkStatus) => void;
+  onSwitchScheduleType?: (cardId: string, newType: 'Delivery' | 'Installation') => void;
   userRole: 'admin' | 'user';
   userDepartment?: Department | '';
   className?: string;
@@ -35,6 +36,7 @@ export default function KanbanList({
   onUpdateCard,
   onAssignUser,
   onUpdateWorkStatus,
+  onSwitchScheduleType,
   userRole,
   userDepartment,
   className,
@@ -223,6 +225,7 @@ export default function KanbanList({
                   onUpdateCard={onUpdateCard}
                   onAssignUser={onAssignUser}
                   onUpdateWorkStatus={onUpdateWorkStatus}
+                  onSwitchScheduleType={onSwitchScheduleType}
                   userRole={userRole}
                   userDepartment={userDepartment}
                   currentList={list}

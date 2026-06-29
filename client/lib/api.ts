@@ -143,6 +143,10 @@ export function mapCard(c: Record<string, unknown>): Card {
     ? rawHistory as { assignedTo: string; assignedAt: string; assignedBy?: string }[]
     : [];
   const rawList = ((c.listName as string) ?? (c.list as string) ?? 'Quotation');
+  const rawScheduleType = c.scheduleType as Card['scheduleType'] | undefined;
+  const legacyScheduleType = rawList === 'Delivery' || rawList === 'Installation'
+    ? (rawList as Card['scheduleType'])
+    : undefined;
 
   return {
     id:                    String(c.id ?? ''),
@@ -157,6 +161,8 @@ export function mapCard(c: Record<string, unknown>): Card {
     subject:               (c.subject as string) ?? '',
     projectLocation:       (c.projectLocation as string) ?? '',
     list:                  normalizeListType(rawList),
+    scheduleType:          rawScheduleType ?? legacyScheduleType,
+    scheduleStage:         (c.scheduleStage as Card['scheduleStage']) ?? undefined,
     channel:               (c.channelName as ChannelType) ?? (c.channel as ChannelType),
     approved:              (c.approved as boolean) ?? false,
     terminated:            (c.terminated as boolean) ?? false,
@@ -261,6 +267,8 @@ function toCardIn(card: Card, performedBy?: number) {
     assigned_to_username:   card.assignedTo ?? null,
     user_work_status:       card.userWorkStatus ?? null,
     payment_percent:        typeof card.paymentPercent === 'number' ? card.paymentPercent : 0,
+    schedule_type:          card.scheduleType ?? null,
+    schedule_stage:         card.scheduleStage ?? null,
     assignment_history:     card.assignmentHistory ?? [],
     completed_at:           card.completedAt ?? null,
     purchase_order_doc_name: card.purchaseOrderDocName ?? null,

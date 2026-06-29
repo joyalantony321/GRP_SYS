@@ -105,7 +105,15 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   };
 
   const handleSave = () => {
-    onUpdate({ ...editedCard, updatedAt: new Date().toISOString() });
+    const normalized =
+      channel === 'Work Order' && editedCard.list === 'Schedule'
+        ? {
+            ...editedCard,
+            scheduleType: editedCard.scheduleType ?? 'Delivery',
+            scheduleStage: editedCard.scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery',
+          }
+        : editedCard;
+    onUpdate({ ...normalized, updatedAt: new Date().toISOString() });
     setIsEditing(false);
   };
 
@@ -180,6 +188,8 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
       prev.includes(list) ? prev.filter(l => l !== list) : [...prev, list]
     );
   };
+
+  const isScheduleList = channel === 'Work Order' && editedCard.list === 'Schedule';
 
   const getRemarkColor = (type: RemarkType) => {
     switch (type) {
@@ -362,7 +372,19 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">List</label>
                       <select
                         value={editedCard.list}
-                        onChange={(e) => setEditedCard({ ...editedCard, list: e.target.value as ListType })}
+                        onChange={(e) => {
+                          const nextList = e.target.value as ListType;
+                          setEditedCard({
+                            ...editedCard,
+                            list: nextList,
+                            scheduleType: nextList === 'Schedule'
+                              ? (editedCard.scheduleType ?? 'Delivery')
+                              : editedCard.scheduleType,
+                            scheduleStage: nextList === 'Schedule'
+                              ? ((editedCard.scheduleType ?? 'Delivery') === 'Installation' ? 'Pending installation' : 'Pending delivery')
+                              : editedCard.scheduleStage,
+                          });
+                        }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                       >
                         {lists.map(list => (
@@ -370,6 +392,26 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         ))}
                       </select>
                     </div>
+                    {isScheduleList && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Schedule Type</label>
+                        <select
+                          value={editedCard.scheduleType || 'Delivery'}
+                          onChange={(e) => {
+                            const nextType = e.target.value as 'Delivery' | 'Installation';
+                            setEditedCard({
+                              ...editedCard,
+                              scheduleType: nextType,
+                              scheduleStage: nextType === 'Installation' ? 'Pending installation' : 'Pending delivery',
+                            });
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        >
+                          <option value="Delivery">Delivery</option>
+                          <option value="Installation">Installation</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-3 flex-wrap text-sm">
