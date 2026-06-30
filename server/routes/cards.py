@@ -27,8 +27,6 @@ router = APIRouter(prefix="/cards", tags=["cards"])
 
 WORK_ORDER_LIST_ALIASES = {
     "Accounts": "Approval",
-    "Delivery": "Schedule",
-    "Installation": "Schedule",
 }
 
 
@@ -118,8 +116,6 @@ class CardIn(BaseModel):
     assigned_to_username: Optional[str] = None    # resolved → user_id
     user_work_status: Optional[str] = None        # WorkingStatus value
     payment_percent: Optional[int] = 0
-    schedule_type: Optional[str] = None
-    schedule_stage: Optional[str] = None
     completed_at: Optional[str] = None
     assignment_history: Optional[list] = None
     purchase_order_doc_name: Optional[str] = None
@@ -230,8 +226,6 @@ def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
 
 def _card_to_dict(card: Card) -> dict:
     channel_name = card.channel_rel.channel_name if card.channel_rel else None
-    raw_list_name = card.list_rel.list_name if card.list_rel else None
-    schedule_type = card.schedule_type or ("Installation" if raw_list_name == "Installation" else "Delivery" if raw_list_name == "Delivery" else None)
     return {
         "id":                   card.id,
         "quoteNumber":          card.quote_number,
@@ -254,8 +248,6 @@ def _card_to_dict(card: Card) -> dict:
         "assignedToUsername":   card.assigned_to_name or (card.assigned_user.username if card.assigned_user else None),
         "userWorkStatus":       card.user_work_status.value if card.user_work_status else None,
         "paymentPercent":       card.payment_percent or 0,
-        "scheduleType":         schedule_type,
-        "scheduleStage":        card.schedule_stage,
         "assignmentHistory":    card.assignment_history or [],
         "completedAt":          card.completed_at.isoformat() if card.completed_at else None,
         "purchaseOrderDocName": card.purchase_order_doc_name,
@@ -353,8 +345,6 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
         assigned_to_name=card_in.assigned_to_username or None,
         user_work_status=status_val,
         payment_percent=_clamp_payment_percent(card_in.payment_percent),
-        schedule_type=card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else None),
-        schedule_stage=card_in.schedule_stage,
         assignment_history=card_in.assignment_history or [],
         purchase_order_doc_name=card_in.purchase_order_doc_name,
         purchase_order_doc_url=card_in.purchase_order_doc_url,
@@ -435,8 +425,6 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
     card.assigned_to_name        = card_in.assigned_to_username or None
     card.user_work_status        = status_val
     card.payment_percent         = _clamp_payment_percent(card_in.payment_percent)
-    card.schedule_type           = card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else card.schedule_type)
-    card.schedule_stage          = card_in.schedule_stage
     card.assignment_history      = card_in.assignment_history if card_in.assignment_history is not None else (card.assignment_history or [])
     card.purchase_order_doc_name = card_in.purchase_order_doc_name
     card.purchase_order_doc_url  = card_in.purchase_order_doc_url

@@ -1,30 +1,16 @@
 export type RemarkType = 'Active' | 'Pending' | 'Inactive';
 
-export type ScheduleType = 'Delivery' | 'Installation';
-
-export type ScheduleStage =
-  | 'Pending delivery'
-  | 'Pending installation'
-  | 'Delivery scheduled'
-  | 'Installation scheduled'
-  | 'Delivery completed'
-  | 'Installation started'
-  | 'Installation in progress'
-  | 'Installation completed';
-
 export type ListType =
   | 'Quotation' | 'Submittal' | 'Review' | 'LPO'
-  | 'Purchase Order' | 'Work Order' | 'Approval' | 'Payments' | 'Delivery' | 'Installation' | 'Schedule'
+  | 'Purchase Order' | 'Work Order' | 'Approval' | 'Payments' | 'Delivery' | 'Installation'
   | 'Accounts';
 
-export const WORK_ORDER_LISTS = ['Work Order', 'Approval', 'Payments', 'Schedule'] as const;
+export const WORK_ORDER_LISTS = ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'] as const;
 
 export type WorkOrderListType = typeof WORK_ORDER_LISTS[number];
 
 export const LEGACY_WORK_ORDER_LIST_ALIASES: Record<string, WorkOrderListType> = {
   Accounts: 'Approval',
-  Delivery: 'Schedule',
-  Installation: 'Schedule',
 };
 
 export function normalizeListType(list: string): ListType {
@@ -60,19 +46,19 @@ export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
 export const DEPARTMENT_LISTS: Record<Department, Partial<Record<ChannelType, ListType[]>>> = {
   'Quotation': {
     'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Technical': {
     'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Accounts': {
     'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
   'Delivery & Installation': {
     'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
+    'Work Order': ['Work Order', 'Approval', 'Payments', 'Delivery', 'Installation'],
   },
 };
 
@@ -122,8 +108,6 @@ export interface Card {
   subject: string;
   projectLocation: string;
   list: ListType;
-  scheduleType?: ScheduleType;
-  scheduleStage?: ScheduleStage;
   channel?: ChannelType;
   remarks: Remark[];
   createdAt: string;

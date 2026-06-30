@@ -35,26 +35,26 @@ CORS_ORIGINS = [
 async def lifespan(app: FastAPI):
     # Create all tables (safe to run multiple times)
     Base.metadata.create_all(bind=engine)
-    # Add columns introduced after initial schema (idempotent).
-    # Each patch runs in its own connection so a failure in one never
-    # aborts subsequent patches.
-    patches = [
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(100)",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_company_name VARCHAR(255)",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER DEFAULT 0",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(20)",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_stage VARCHAR(40)",
-        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
-        "ALTER TABLE remarks ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(200)",
-    ]
-    for sql in patches:
-        try:
-            with engine.begin() as conn:
+    # Add columns introduced after initial schema (idempotent)
+    with engine.connect() as conn:
+        patches = [
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS revision_number INTEGER",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(100)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_company_name VARCHAR(255)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(20)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_stage VARCHAR(40)",
+            "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
+            "ALTER TABLE remarks ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(200)",
+        ]
+        for sql in patches:
+            try:
                 conn.execute(text(sql))
-        except Exception as exc:
-            print(f"[startup-migration] skipped (already applied or error): {exc}")
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f"[startup-migration] failed: {sql} :: {exc}")
     yield
 
 
