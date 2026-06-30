@@ -108,13 +108,23 @@ export default function KanbanList({
     return counts;
   }, [cards, list]);
 
+  const isScheduleList = list === 'Schedule';
+
+  const scheduleTypeCounts = useMemo(() => {
+    if (!isScheduleList) return null;
+    return {
+      deliveries: cards.filter(c => (c.scheduleType ?? 'Delivery') === 'Delivery').length,
+      installations: cards.filter(c => c.scheduleType === 'Installation').length,
+    };
+  }, [cards, isScheduleList]);
+
   return (
     <div className={`flex flex-col flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-gray-200 ${className ?? ''}`}>
-      <div className="p-4 border-b border-gray-200">
-        <div className={`flex items-center justify-between ${userRole === 'admin' ? 'mb-3' : ''}`}>
+      <div className={`p-4 border-b ${isScheduleList ? 'border-purple-200 bg-gradient-to-b from-purple-50/60 to-transparent' : 'border-gray-200'}`}>
+        <div className={`flex items-center justify-between ${(userRole === 'admin' || isScheduleList) ? 'mb-2' : ''}`}>
           <div className="flex items-center gap-3">
-            <div className="w-1.5 h-6 bg-gray-400 rounded-full"></div>
-            <h3 className="font-semibold text-gray-900 text-base">{list}</h3>
+            <div className={`w-1.5 h-6 rounded-full ${isScheduleList ? 'bg-purple-400' : 'bg-gray-400'}`}></div>
+            <h3 className={`font-semibold text-base ${isScheduleList ? 'text-purple-900' : 'text-gray-900'}`}>{list}</h3>
             <span className="text-sm text-gray-500 font-medium">{filteredCards.length}</span>
             {userRole === 'user' && (
               <select
@@ -169,6 +179,22 @@ export default function KanbanList({
           </div>
         </div>
 
+        {/* Schedule type summary counters */}
+        {isScheduleList && scheduleTypeCounts && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+              <span className="text-sm">🚚</span>
+              <span className="text-xs font-semibold text-amber-700">Deliveries</span>
+              <span className="min-w-[1.25rem] text-center text-xs font-bold text-white bg-amber-500 px-1.5 py-0.5 rounded-full">{scheduleTypeCounts.deliveries}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-teal-50 border border-teal-200 rounded-lg">
+              <span className="text-sm">🔧</span>
+              <span className="text-xs font-semibold text-teal-700">Installations</span>
+              <span className="min-w-[1.25rem] text-center text-xs font-bold text-white bg-teal-500 px-1.5 py-0.5 rounded-full">{scheduleTypeCounts.installations}</span>
+            </div>
+          </div>
+        )}
+
         {/* Filter dropdowns for admin */}
         {userRole === 'admin' && (
           <div className="flex items-center gap-2">
@@ -202,7 +228,7 @@ export default function KanbanList({
             ref={provided.innerRef}
             {...provided.droppableProps}
             className={`flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide ${
-              snapshot.isDraggingOver ? 'bg-pink-50/50' : ''
+              snapshot.isDraggingOver ? (isScheduleList ? 'bg-purple-50/50' : 'bg-pink-50/50') : ''
             }`}
           >
             {filteredCards.length === 0 ? (

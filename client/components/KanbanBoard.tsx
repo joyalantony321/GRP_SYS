@@ -1097,7 +1097,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 {lists.includes('Work Order') ? renderKanbanList('Work Order', 'h-full min-h-0') : <div />}
                 {lists.includes('Approval') ? renderKanbanList('Approval', 'h-full min-h-0') : <div />}
                 {lists.includes('Payments') ? renderKanbanList('Payments', 'h-full min-h-0') : <div />}
-                {lists.includes('Schedule') ? renderKanbanList('Schedule', 'h-full min-h-0 border-2 border-amber-200 bg-amber-50/40 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]') : <div />}
+                {lists.includes('Schedule') ? renderKanbanList('Schedule', 'h-full min-h-0 border-2 border-violet-200 bg-violet-50/30 shadow-[0_0_0_2px_rgba(139,92,246,0.12)]') : <div />}
               </div>
             ) : (
               <div className="flex gap-3 h-full w-full">
