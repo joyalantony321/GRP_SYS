@@ -632,6 +632,35 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     setCards(updatedCards);
   };
 
+  const applyCardMove = (cardId: string, destList: ListType, scheduleType?: 'Delivery' | 'Installation') => {
+    const movedCard = cards.find(card => card.id === cardId);
+    if (!movedCard) return;
+
+    const moveTime = new Date().toISOString();
+    const nextScheduleType = scheduleType ?? movedCard.scheduleType;
+    const nextScheduleStage = destList === 'Schedule'
+      ? (nextScheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery')
+      : movedCard.scheduleStage;
+    const updatedCard = {
+      ...movedCard,
+      list: destList,
+      scheduleType: nextScheduleType,
+      scheduleStage: nextScheduleStage,
+      updatedAt: moveTime,
+      listHistory: [
+        ...(movedCard.listHistory ?? [{ list: movedCard.list, enteredAt: movedCard.createdAt }]),
+        { list: destList, enteredAt: moveTime },
+      ],
+    };
+
+    const updatedCards = cards.map(card => card.id === cardId ? updatedCard : card);
+    setCards(updatedCards);
+
+    if (selectedCard?.id === cardId) {
+      setSelectedCard(updatedCard);
+    }
+  };
+
   const onDragEnd = (result: DropResult) => {
     const { source, destination, draggableId } = result;
 

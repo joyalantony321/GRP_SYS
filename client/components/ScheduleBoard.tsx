@@ -414,41 +414,20 @@ function WorkersModal({ destId, onConfirm, onCancel }: { destId:string; onConfir
 
 function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listId:string; onClose:()=>void; onSave:(c:ScCard,lid:string)=>void }) {
   const [ec, setEc] = useState<ScCard>({...card, remarks:[...card.remarks]});
-  const [remarkText, setRemarkText] = useState(''); const [remarkAuthor, setRemarkAuthor] = useState('');
+  const [remarkText, setRemarkText] = useState('');
+  const [remarkAuthor, setRemarkAuthor] = useState('');
   const [remarkMedia, setRemarkMedia] = useState<ScRemarkMedia[]>([]);
   const [workerInput, setWorkerInput] = useState('');
-  const isDateList = listId.startsWith('delivery-')||listId.startsWith('installation-');
+  const [targetListId, setTargetListId] = useState(listId);
+
+  const isDateList = listId.startsWith('delivery-') || listId.startsWith('installation-');
   const isDel = listId.startsWith('delivery-');
   const isInstallationCard = listId.startsWith('installation-') || listId === 'pending-installation';
   const isDelayedNow = isCardCurrentlyDelayed(ec);
-  const dk = isDateList ? listId.replace(/^(delivery|installation)-/,'') : null;
+  const dk = isDateList ? listId.replace(/^(delivery|installation)-/, '') : null;
   const isTodayCol = dk ? isToday(parseISO(dk)) : false;
   const stageText = getScheduleStage(ec, listId);
-  const deliveryDate = listId.startsWith('delivery-')
-    ? listId.replace(/^delivery-/, '')
-    : (ec.scheduleType === 'Delivery' ? (ec.confirmedDate || '-') : '-');
-  const deliveryStatus = ec.scheduleType === 'Delivery'
-    ? (ec.isConfirmed ? 'Completed' : (listId.startsWith('delivery-') ? 'Scheduled' : 'Pending'))
-    : '-';
-  const deliveryCompletedDate = ec.scheduleType === 'Delivery' && ec.isConfirmed
-    ? (ec.confirmedDate || '-')
-    : '-';
-  const latestRemark = ec.remarks.length > 0 ? ec.remarks[ec.remarks.length - 1].text : '-';
-  const detailRows = [
-    { label: 'W.O.NO.', value: ec.woCode || '-' },
-    { label: 'CUSTOMER', value: ec.customer || '-' },
-    { label: 'TANK SIZE', value: ec.tankSize || '-' },
-    { label: 'BRAND', value: ec.brand || '-' },
-    { label: 'TYPE', value: ec.productType || '-' },
-    { label: 'LOCATION', value: ec.location || '-' },
-    { label: 'DEL. DATE', value: deliveryDate || '-' },
-    { label: 'DEL. STATUS', value: deliveryStatus },
-    { label: 'DEL. COMP. DATE', value: deliveryCompletedDate },
-    { label: 'CONTACT PERSON', value: ec.contactPerson || '-' },
-    { label: 'PHONE NUMBER', value: ec.phone || '-' },
-    { label: 'SALES PERSON', value: ec.salesPerson || '-' },
-    { label: 'REMARKS', value: latestRemark || '-' },
-  ];
+
   const addWorker = () => {
     const w = workerInput.trim();
     if (!w) return;
@@ -466,74 +445,146 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
     reader.readAsDataURL(file);
   };
   const addRemark = () => {
-    if(!remarkText.trim() && remarkMedia.length===0)return;
-    const r:ScRemark={id:String(Date.now()),text:remarkText.trim(),author:remarkAuthor.trim()||'Unknown',at:new Date().toISOString(),media:remarkMedia.length?remarkMedia:undefined};
-    setEc(p=>({...p,remarks:[...p.remarks,r]})); setRemarkText(''); setRemarkAuthor('');
-    setRemarkMedia([]);
+    if (!remarkText.trim() && remarkMedia.length === 0) return;
+    const r: ScRemark = { id: String(Date.now()), text: remarkText.trim(), author: remarkAuthor.trim() || 'Unknown', at: new Date().toISOString(), media: remarkMedia.length ? remarkMedia : undefined };
+    setEc(p => ({ ...p, remarks: [...p.remarks, r] }));
+    setRemarkText(''); setRemarkAuthor(''); setRemarkMedia([]);
   };
+
+  useEffect(() => {
+    setTargetListId(listId);
+  }, [listId, card.id]);
+
+  // Stage pill colour
+  const stagePillCls = stageText.toLowerCase().includes('complet') ? 'bg-green-100 text-green-700 border-green-200'
+    : stageText.toLowerCase().includes('pending') ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : stageText.toLowerCase().includes('scheduled') ? 'bg-blue-100 text-blue-700 border-blue-200'
+    : stageText.toLowerCase().includes('started') || stageText.toLowerCase().includes('progress') ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    : 'bg-slate-100 text-slate-700 border-slate-200';
+
+  const infoFields = [
+    { label: 'Tank Size',      value: ec.tankSize    || '—' },
+    { label: 'Brand',          value: ec.brand       || '—' },
+    { label: 'Type',           value: ec.productType || '—' },
+    { label: 'Contact Person', value: ec.contactPerson || '—' },
+    { label: 'Phone',          value: ec.phone       || '—' },
+    { label: 'Sales Person',   value: ec.salesPerson || '—' },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{maxHeight:'88vh'}}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
-          <div className="flex items-center gap-4 min-w-0">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white ${ec.isEmergency?'bg-red-500':'bg-purple-600'}`}>{ec.woCode}</div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden" style={{ maxWidth: '780px', maxHeight: '90vh' }}>
+
+        {/* ── Header ─────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm text-white shrink-0 ${ec.isEmergency ? 'bg-red-500' : 'bg-purple-600'}`}>
+              {ec.woCode}
+            </div>
             <div className="min-w-0">
-              <h2 className="text-base font-semibold text-gray-900 truncate">{ec.customer||`WO-${ec.woCode}`}</h2>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700">{stageText}</span>
-                {ec.brand && <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700">Brand: {ec.brand}</span>}
-                {ec.productType && <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-indigo-50 text-indigo-700">Type: {ec.productType}</span>}
-              </div>
-              {ec.location&&<p className="text-sm text-gray-500 mt-1 truncate">{ec.location}{ec.tankSize?` · ${ec.tankSize}`:''}</p>}
+              <h2 className="text-base font-bold text-gray-900 truncate leading-tight">
+                {ec.customer || '—'}
+              </h2>
+              <p className="text-xs text-gray-500 truncate mt-0.5">
+                {ec.location || '—'}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 pl-3">
+          <div className="flex items-center gap-2 pl-4 shrink-0">
             <button
               onClick={() => setEc(p => ({ ...p, isEmergency: !p.isEmergency }))}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${ec.isEmergency ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${ec.isEmergency ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
             >
               <AlertTriangle className="w-3.5 h-3.5" />
               {ec.isEmergency ? 'Emergency ON' : 'Emergency'}
             </button>
-            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-500"/></button>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+              <X className="w-4 h-4 text-gray-500" />
+            </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4">
-          <div className="p-4 rounded-xl border border-yellow-300 bg-yellow-50">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {detailRows.map((row) => (
-                <div key={row.label} className="rounded-lg border border-yellow-200 bg-white px-3 py-2">
-                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{row.label}</div>
-                  <div className="text-sm font-semibold text-gray-800 mt-0.5 break-words">{row.value}</div>
+
+        {/* ── Body ───────────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-4">
+
+          {/* Info grid — 3 columns */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {infoFields.map(f => (
+              <div key={f.label} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{f.label}</div>
+                <div className="text-sm font-semibold text-gray-800 truncate">{f.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Payment + Workers — side by side */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Payment card */}
+            <div className="rounded-xl border border-gray-200 px-4 py-3" style={{ backgroundColor: pBg(ec.paymentPercent) }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-600">Payment Received</span>
+                <span className="text-base font-bold" style={{ color: pColor(ec.paymentPercent) }}>{ec.paymentPercent}%</span>
+              </div>
+              <input
+                type="range" min={0} max={100} step={5} value={ec.paymentPercent}
+                onChange={e => setEc(p => ({ ...p, paymentPercent: Number(e.target.value) }))}
+                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                style={{ accentColor: pColor(ec.paymentPercent) }}
+              />
+              <div className="flex justify-between text-[10px] text-gray-400 mt-1.5">
+                <span>0%🔴</span><span>50%🔵</span><span>100%🟢</span>
+              </div>
+            </div>
+
+            {/* Workers card */}
+            <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-teal-700">Workers</span>
+                <span className="text-[10px] font-semibold text-teal-500 bg-teal-100 px-1.5 py-0.5 rounded-full">{ec.workers.length} assigned</span>
+              </div>
+              <div className="flex gap-1.5 mb-2">
+                <input
+                  value={workerInput}
+                  onChange={e => setWorkerInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addWorker()}
+                  placeholder="Add worker"
+                  className="flex-1 min-w-0 px-2.5 py-1.5 border border-teal-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                />
+                <button onClick={addWorker} className="px-2.5 py-1.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 shrink-0">
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {ec.workers.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
+                  {ec.workers.map(w => (
+                    <span key={w} className="flex items-center gap-1 px-2 py-0.5 bg-white border border-teal-200 rounded-full text-xs text-teal-700">
+                      {w}
+                      <button onClick={() => setEc(p => ({ ...p, workers: p.workers.filter(x => x !== w) }))} className="text-teal-400 hover:text-red-500 ml-0.5">×</button>
+                    </span>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
-          {ec.workers.length>0&&(
-            <div className="p-4 rounded-xl border border-gray-200 bg-gray-50">
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Workers</div>
-              <div className="text-sm text-gray-800 mt-1">{ec.workers.join(', ')}</div>
-            </div>
-          )}
-          <div className="p-4 rounded-xl border border-gray-200" style={{backgroundColor:pBg(ec.paymentPercent)}}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-gray-700">Payment Received</span>
-              <span className="text-lg font-bold" style={{color:pColor(ec.paymentPercent)}}>{ec.paymentPercent}%</span>
-            </div>
-            <input type="range" min={0} max={100} step={5} value={ec.paymentPercent}
-              onChange={e=>setEc(p=>({...p,paymentPercent:Number(e.target.value)}))} className="w-full" style={{accentColor:pColor(ec.paymentPercent)}}/>
-            <div className="flex justify-between text-xs text-gray-400 mt-1"><span>0% 🔴</span><span>1-49% 🟡</span><span>50-99% 🔵</span><span>100% 🟢</span></div>
-          </div>
-          {isInstallationCard&&(
-            <div className="p-4 rounded-xl border border-gray-200 bg-indigo-50">
-              <label className="block text-sm font-semibold text-indigo-700 mb-2">Installation Current Status</label>
-              <input value={ec.installationStatus||''} onChange={e=>setEc(p=>({...p,installationStatus:e.target.value||undefined}))}
-                placeholder="Write current installation status"
-                className="w-full px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"/>
-              <div className="mt-3 flex items-center justify-between rounded-xl border border-indigo-200 bg-white px-3 py-2">
+
+          {/* Installation status + delay (installation cards only) */}
+          {isInstallationCard && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                <label className="block text-xs font-semibold text-indigo-700 mb-1.5">Installation Status</label>
+                <input
+                  value={ec.installationStatus || ''}
+                  onChange={e => setEc(p => ({ ...p, installationStatus: e.target.value || undefined }))}
+                  placeholder="Current installation status"
+                  className="w-full px-2.5 py-1.5 border border-indigo-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                />
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-gray-800">Delay State</div>
-                  <div className={`text-xs font-medium ${isDelayedNow ? 'text-red-600' : 'text-green-600'}`}>{isDelayedNow ? 'Delayed' : 'On Track'}</div>
+                  <div className="text-xs font-semibold text-gray-700 mb-0.5">Delay State</div>
+                  <div className={`text-xs font-bold ${isDelayedNow ? 'text-red-600' : 'text-green-600'}`}>
+                    {isDelayedNow ? '⚠ Delayed' : '✓ On Track'}
+                  </div>
                 </div>
                 <button
                   onClick={() => setEc(prev => {
@@ -541,103 +592,183 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                     if (isCardCurrentlyDelayed(prev)) {
                       const periods = [...(prev.delayPeriods ?? [])];
                       for (let i = periods.length - 1; i >= 0; i -= 1) {
-                        if (!periods[i].endDate) {
-                          periods[i] = { ...periods[i], endDate: today };
-                          break;
-                        }
+                        if (!periods[i].endDate) { periods[i] = { ...periods[i], endDate: today }; break; }
                       }
                       return { ...prev, delayPeriods: periods };
                     }
-                    return {
-                      ...prev,
-                      delayPeriods: [...(prev.delayPeriods ?? []), { startDate: today }],
-                    };
+                    return { ...prev, delayPeriods: [...(prev.delayPeriods ?? []), { startDate: today }] };
                   })}
-                  className={`px-3 py-2 rounded-lg text-sm font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
                 >
                   {isDelayedNow ? 'Set On Track' : 'Mark Delayed'}
                 </button>
               </div>
             </div>
           )}
-          <div className="p-4 rounded-xl border border-gray-200 bg-teal-50">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold text-teal-700">Workers (Editable Anytime)</span>
-              <span className="text-xs text-teal-600">{ec.workers.length} assigned</span>
+
+          {/* Action buttons */}
+          {isDateList && isTodayCol && !ec.isConfirmed && (
+            isDel ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => {
+                    setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }));
+                    setTargetListId(listId);
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4" />✓ Mark Delivered
+                </button>
+                <button
+                  onClick={() => {
+                    const moved: ScCard = {
+                      ...ec,
+                      // Move as a fresh pending-installation card (not scheduled/started)
+                      isConfirmed: false,
+                      confirmedDate: undefined,
+                      scheduleType: 'Installation',
+                      completedDate: undefined,
+                    };
+                    setEc(moved);
+                    setTargetListId('pending-installation');
+                    onSave(moved, 'pending-installation');
+                    onClose();
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <CheckCircle className="w-4 h-4" />Mark Delivered & send to Installation
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }))}
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+              >
+                <CheckCircle className="w-4 h-4" />▶ Start Installation
+              </button>
+            )
+          )}
+          {isDateList && ec.isConfirmed && (
+            <div className="flex items-center gap-2.5 px-4 py-2.5 bg-green-50 border border-green-200 rounded-xl">
+              <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
+              <span className="text-sm font-semibold text-green-700">{isDel ? 'Delivered' : 'Started'} on {ec.confirmedDate}</span>
             </div>
-            <div className="flex gap-2 mb-2">
-              <input value={workerInput} onChange={e=>setWorkerInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addWorker()} placeholder="Add worker"
-                className="flex-1 px-3 py-2 border border-teal-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"/>
-              <button onClick={addWorker} className="px-3 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700"><Plus className="w-4 h-4"/></button>
-            </div>
-            {ec.workers.length>0&&<div className="flex flex-wrap gap-2">{ec.workers.map(w=>(
-              <span key={w} className="flex items-center gap-1.5 px-3 py-1 bg-white border border-teal-200 rounded-full text-sm text-teal-700">
-                {w}<button onClick={()=>setEc(p=>({...p,workers:p.workers.filter(x=>x!==w)}))} className="text-teal-400 hover:text-teal-700">×</button>
-              </span>))}</div>}
-          </div>
-          {isDateList&&isTodayCol&&!ec.isConfirmed&&(
-            <button onClick={()=>setEc(p=>({...p,isConfirmed:true,confirmedDate:format(new Date(),'yyyy-MM-dd')}))}
-              className={`w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 ${isDel?'bg-green-600 hover:bg-green-700':'bg-indigo-600 hover:bg-indigo-700'}`}>
-              <CheckCircle className="w-4 h-4"/>{isDel?'✓ Mark Delivered':'▶ Start Installation'}</button>)}
-          {isDateList&&ec.isConfirmed&&(
-            <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
-              <CheckCircle className="w-4 h-4 text-green-600"/>
-              <span className="text-sm font-semibold text-green-700">{isDel?'Delivered':'Started'} on {ec.confirmedDate}</span></div>)}
-          {!isDel&&ec.isConfirmed&&!ec.completedDate&&(
-            <button onClick={()=>setEc(p=>({...p,completedDate:dateKey()}))}
-              className="w-full py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700">
-              <CheckCircle className="w-4 h-4"/>Mark Installation Completed
+          )}
+          {!isDel && ec.isConfirmed && !ec.completedDate && (
+            <button
+              onClick={() => setEc(p => ({ ...p, completedDate: dateKey() }))}
+              className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700"
+            >
+              <CheckCircle className="w-4 h-4" /> Mark Installation Completed
             </button>
           )}
-          {!isDel&&ec.completedDate&&(
-            <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
-              <CheckCircle className="w-4 h-4 text-blue-600"/>
+          {!isDel && ec.completedDate && (
+            <div className="flex items-center gap-2.5 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-xl">
+              <CheckCircle className="w-4 h-4 text-blue-600 shrink-0" />
               <span className="text-sm font-semibold text-blue-700">Completed on {ec.completedDate}</span>
             </div>
           )}
+
+          {/* Remarks — chat bubble style */}
           <div>
-            <div className="flex items-center gap-2 mb-3"><MessageSquare className="w-4 h-4 text-gray-400"/>
-              <span className="text-sm font-semibold text-gray-700">Remarks ({ec.remarks.length})</span></div>
-            <div className="flex flex-col gap-2 mb-3 max-h-40 overflow-y-auto">
-              {ec.remarks.length===0&&<p className="text-sm text-gray-400 italic">No remarks yet.</p>}
-              {ec.remarks.map(r=>(
-                <div key={r.id} className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl">
-                  <p className="text-sm text-gray-800">{r.text}</p>
-                  {r.media&&r.media.length>0&&(
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {r.media.map(m=>m.kind==='image' ? (
-                        <img key={m.id} src={m.dataUrl} alt={m.name} className="w-full h-28 object-cover rounded-lg border border-gray-200"/>
-                      ) : (
-                        <video key={m.id} src={m.dataUrl} controls className="w-full h-28 rounded-lg border border-gray-200" />
+            <div className="flex items-center gap-2 mb-3">
+              <MessageSquare className="w-4 h-4 text-gray-400" />
+              <span className="text-sm font-semibold text-gray-700">Remarks</span>
+              {ec.remarks.length > 0 && (
+                <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-full text-[10px] font-semibold">{ec.remarks.length}</span>
+              )}
+            </div>
+
+            {/* Existing remarks */}
+            <div className="flex flex-col gap-3 mb-4 max-h-52 overflow-y-auto pr-1">
+              {ec.remarks.length === 0 ? (
+                <p className="text-xs text-gray-400 italic text-center py-2">No remarks yet.</p>
+              ) : ec.remarks.map(r => (
+                <div key={r.id} className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-xs font-bold text-purple-700 shrink-0 mt-0.5">
+                    {(r.author || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0 bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-sm px-3 py-2">
+                    <div className="flex items-baseline justify-between gap-2 mb-1">
+                      <span className="text-xs font-semibold text-gray-800">{r.author}</span>
+                      <span className="text-[10px] text-gray-400 shrink-0">{format(parseISO(r.at), 'dd MMM yy, HH:mm')}</span>
+                    </div>
+                    {r.text && <p className="text-sm text-gray-700 leading-relaxed">{r.text}</p>}
+                    {r.media && r.media.length > 0 && (
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        {r.media.map(m => m.kind === 'image' ? (
+                          <img key={m.id} src={m.dataUrl} alt={m.name} className="w-full h-24 object-cover rounded-lg border border-gray-200" />
+                        ) : (
+                          <video key={m.id} src={m.dataUrl} controls className="w-full h-24 rounded-lg border border-gray-200" />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* New remark composer */}
+            <div className="flex items-start gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0 mt-0.5">
+                {remarkAuthor ? remarkAuthor.charAt(0).toUpperCase() : '+'}
+              </div>
+              <div className="flex-1 min-w-0 border border-gray-200 rounded-2xl rounded-tl-sm bg-white overflow-hidden focus-within:ring-2 focus-within:ring-purple-400 focus-within:border-purple-300">
+                <input
+                  value={remarkAuthor}
+                  onChange={e => setRemarkAuthor(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-700 placeholder-gray-400 focus:outline-none border-b border-gray-100"
+                />
+                <textarea
+                  value={remarkText}
+                  onChange={e => setRemarkText(e.target.value)}
+                  placeholder="Write a remark…"
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none placeholder-gray-400"
+                />
+                <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-gray-100 gap-2">
+                  <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer hover:text-purple-600 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                    </svg>
+                    {remarkMedia.length > 0 ? `${remarkMedia.length} file(s)` : 'Attach'}
+                    <input type="file" accept="image/*,video/*" multiple className="hidden"
+                      onChange={e => { const files = Array.from(e.target.files ?? []); files.forEach(addMedia); e.currentTarget.value = ''; }} />
+                  </label>
+                  {remarkMedia.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {remarkMedia.map(m => (
+                        <span key={m.id} className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-50 border border-purple-200 rounded-full text-[10px] text-purple-700">
+                          {m.name.length > 12 ? m.name.slice(0, 12) + '…' : m.name}
+                          <button onClick={() => setRemarkMedia(prev => prev.filter(x => x.id !== m.id))} className="text-purple-400 hover:text-red-500">×</button>
+                        </span>
                       ))}
                     </div>
                   )}
-                  <p className="text-xs text-gray-400 mt-1">— {r.author} · {format(parseISO(r.at),'dd/MM/yy HH:mm')}</p>
-                </div>))}
-            </div>
-            <div className="border-t border-gray-200 pt-3 flex flex-col gap-2">
-              <input value={remarkAuthor} onChange={e=>setRemarkAuthor(e.target.value)} placeholder="Your name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"/>
-              <label className="text-xs text-gray-500">Attach Images/Videos</label>
-              <input type="file" accept="image/*,video/*" multiple onChange={e=>{const files=Array.from(e.target.files??[]); files.forEach(addMedia); e.currentTarget.value='';}}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"/>
-              {remarkMedia.length>0&&<div className="flex flex-wrap gap-2">{remarkMedia.map(m=>(
-                <span key={m.id} className="px-2 py-1 bg-purple-50 border border-purple-200 rounded-full text-xs text-purple-700 flex items-center gap-1.5">
-                  {m.kind==='video'?'VIDEO':'IMAGE'}: {m.name}
-                  <button onClick={()=>setRemarkMedia(prev=>prev.filter(x=>x.id!==m.id))} className="text-purple-400 hover:text-purple-700">×</button>
-                </span>
-              ))}</div>}
-              <div className="flex gap-2">
-                <textarea value={remarkText} onChange={e=>setRemarkText(e.target.value)} placeholder="Write a remark…" rows={2}
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"/>
-                <button onClick={addRemark} className="px-3 self-stretch bg-purple-600 text-white rounded-lg hover:bg-purple-700"><Plus className="w-4 h-4"/></button>
+                  <button
+                    onClick={addRemark}
+                    className="ml-auto px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 shrink-0"
+                  >
+                    Post
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-gray-200 flex gap-3 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
-          <button onClick={()=>{onSave(ec,listId);onClose();}} className="flex-1 py-2.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700">Save Changes</button>
+
+        {/* ── Footer ─────────────────────────────────────────────────── */}
+        <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={() => { onSave(ec, targetListId); onClose(); }}
+            className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors"
+          >
+            Save Changes
+          </button>
         </div>
       </div>
     </div>
@@ -694,7 +825,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     workOrderCardsRef.current = workOrderCards;
   }, [workOrderCards]);
 
-  const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard) => {
+  const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard, forcedScheduleType?: 'Delivery' | 'Installation') => {
     if (!sc.sourceCardId) return;
     let src = workOrderCardsRef.current.find(c => String(c.id) === String(sc.sourceCardId));
     if (!src) {
@@ -711,17 +842,26 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const scheduleStage = getScheduleStage(sc, sc.listId);
     const srcStage = src.scheduleStage;
     const srcPayment = typeof src.paymentPercent === 'number' ? src.paymentPercent : 0;
-    if (srcPayment === sc.paymentPercent && srcStage === scheduleStage) {
+    const nextScheduleType = forcedScheduleType ?? src.scheduleType;
+    if (srcPayment === sc.paymentPercent && srcStage === scheduleStage && src.scheduleType === nextScheduleType) {
       return;
     }
-    // IMPORTANT: Do NOT sync scheduleType back to Work Order.
-    // Work Order is the authority for scheduleType; Schedule channel only reports stage.
+    // Normally WO is the authority for scheduleType, but explicit list-based moves
+    // (e.g. delivered -> pending-installation) must persist type to prevent bounce-back on poll.
     const updated: WorkOrderCard = {
       ...src,
       paymentPercent: sc.paymentPercent,
+      scheduleType: nextScheduleType,
       scheduleStage,
       updatedAt: new Date().toISOString(),
     };
+    // Optimistically update workOrderCardsRef BEFORE the async PUT so that any
+    // mergeScheduleWithWorkOrder call happening during the in-flight request
+    // already sees the new scheduleType and does not bounce the card back.
+    workOrderCardsRef.current = workOrderCardsRef.current.map(c =>
+      String(c.id) === String(updated.id) ? updated : c
+    );
+    setWorkOrderCards(prev => prev.map(c => String(c.id) === String(updated.id) ? updated : c));
     try {
       const uid = localStorage.getItem('userId');
       const saved = await updateCard(updated, uid ? Number(uid) : undefined);
@@ -1304,8 +1444,25 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       {/* Modals */}
       {addCardType&&<AddCardModal type={addCardType} onClose={()=>setAddCardType(null)} onAdd={c=>setStore(prev=>({...prev,[c.listId]:[...(prev[c.listId]??[]),c]}))}/>}
       {selected&&<CardDetailModal card={selected.card} listId={selected.listId} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
-        setStore(prev=>({...prev,[lid]:(prev[lid]??[]).map(c=>c.id===u.id?u:c)}));
-        void syncScheduleCardToWorkOrder(u);
+        setStore(prev => {
+          const sourceList = selected.listId;
+          const next: ScStore = { ...prev };
+          next[sourceList] = (next[sourceList] ?? []).filter(c => c.id !== u.id);
+          const destination = next[lid] ?? [];
+          if (destination.some(c => c.id === u.id)) {
+            next[lid] = destination.map(c => c.id === u.id ? { ...u, listId: lid } : c);
+          } else {
+            next[lid] = [{ ...u, listId: lid }, ...destination];
+          }
+          return next;
+        });
+        const forcedType: 'Delivery' | 'Installation' | undefined =
+          (lid === 'pending-installation' || lid.startsWith('installation-'))
+            ? 'Installation'
+            : (lid === 'pending-delivery' || lid.startsWith('delivery-'))
+              ? 'Delivery'
+              : undefined;
+        void syncScheduleCardToWorkOrder({ ...u, listId: lid }, forcedType);
       }}/>} 
       {pendingDrop&&(
         <WorkersModal destId={pendingDrop.dstId}

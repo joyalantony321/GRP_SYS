@@ -2,37 +2,24 @@
   "pending-delivery": [],
   "pending-installation": [],
   "delivery-2026-06-27": [],
-  "delivery-2026-06-29": [
-    {
-      "id": "wo-1782741574636",
-      "sourceCardId": "1782741574636",
-      "woCode": "6598",
-      "scheduleType": "Delivery",
-      "listId": "delivery-2026-06-29",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": true,
-      "remarks": [],
-      "createdAt": "2026-06-29T13:59:34.645013+00:00",
-      "confirmedDate": "2026-06-29"
-    }
-  ],
+  "delivery-2026-06-29": [],
   "delivery-2026-06-30": [],
-  "installation-2026-06-29": [
+  "installation-2026-06-29": [],
+  "installation-2026-07-01": [],
+  "installation-2026-06-30": [
     {
-      "id": "wo-1782741716322",
-      "sourceCardId": "1782741716322",
-      "woCode": "9865",
+      "id": "wo-1782821922184",
+      "sourceCardId": "1782821922184",
+      "woCode": "7485",
       "scheduleType": "Installation",
-      "listId": "installation-2026-06-29",
+      "listId": "installation-2026-06-30",
       "workers": [],
       "isEmergency": false,
       "paymentPercent": 0,
       "isConfirmed": true,
       "remarks": [],
-      "createdAt": "2026-06-29T14:01:56.329572+00:00",
-      "confirmedDate": "2026-06-29"
+      "createdAt": "2026-06-30T12:18:42.200141+00:00",
+      "confirmedDate": "2026-06-30"
     }
   ]
 }
