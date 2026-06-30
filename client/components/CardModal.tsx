@@ -109,8 +109,8 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
       channel === 'Work Order' && editedCard.list === 'Schedule'
         ? {
             ...editedCard,
-            scheduleType: editedCard.scheduleType ?? 'Delivery',
-            scheduleStage: editedCard.scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery',
+            scheduleType: editedCard.scheduleType ?? ('Delivery' as import('@/types').ScheduleType),
+            scheduleStage: (editedCard.scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery') as import('@/types').ScheduleStage,
           }
         : editedCard;
     onUpdate({ ...normalized, updatedAt: new Date().toISOString() });

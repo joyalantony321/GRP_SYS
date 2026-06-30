@@ -650,6 +650,16 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     }
   };
 
+  const handleSwitchScheduleType = (cardId: string) => {
+    const now = new Date().toISOString();
+    const updatedCards = cards.map(card => {
+      if (card.id !== cardId) return card;
+      const next = card.scheduleType === 'Delivery' ? 'Installation' : 'Delivery';
+      return { ...card, scheduleType: next as import('@/types').ScheduleType, updatedAt: now };
+    });
+    setCards(updatedCards);
+  };
+
   const handleAssignUser = (cardId: string, assigneeName: string | undefined) => {
     const now = new Date().toISOString();
     const updatedCards = cards.map(card => {
