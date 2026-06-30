@@ -152,6 +152,9 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
 
     // ── Work Order channel ──
     if (isWOChannel) {
+      // Schedule-type colour coding (Delivery = amber, Installation = teal)
+      if (card.scheduleType === 'Delivery') return 'bg-amber-50 border-l-4 border-l-amber-500';
+      if (card.scheduleType === 'Installation') return 'bg-teal-50 border-l-4 border-l-teal-500';
       // Came from Quotation channel (LPO approved → cloned) → light orange
       if (card.approved) return 'bg-orange-50 border-l-4 border-l-orange-400';
       // Created directly in Work Order channel → light purple

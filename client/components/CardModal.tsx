@@ -337,7 +337,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       <input
                         type="date"
                         value={editedCard.date}
-                        onChange={(e) => setEditedCard({ ...editedCard, date: e.target.value })}
+                        onChange={(e) => {
+                          const d = e.target.value;
+                          setEditedCard(prev => {
+                            const next = { ...prev, date: d };
+                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, woDate: d };
+                            return next;
+                          });
+                        }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                       />
                     </div>
@@ -355,7 +362,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       <input
                         type="text"
                         value={editedCard.customerName || ''}
-                        onChange={(e) => setEditedCard({ ...editedCard, customerName: e.target.value })}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditedCard(prev => {
+                            const next = { ...prev, customerName: v };
+                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, companyContactName: v };
+                            return next;
+                          });
+                        }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                       />
                     </div>
@@ -364,7 +378,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       <input
                         type="text"
                         value={editedCard.customerCompanyName || ''}
-                        onChange={(e) => setEditedCard({ ...editedCard, customerCompanyName: e.target.value })}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditedCard(prev => {
+                            const next = { ...prev, customerCompanyName: v };
+                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, companyName: v };
+                            return next;
+                          });
+                        }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                       />
                     </div>
@@ -458,7 +479,14 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                   {isEditing ? (
                     <textarea
                       value={editedCard.projectLocation}
-                      onChange={(e) => setEditedCard({ ...editedCard, projectLocation: e.target.value })}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEditedCard(prev => {
+                          const next = { ...prev, projectLocation: v };
+                          if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, deliveryLocation: v };
+                          return next;
+                        });
+                      }}
                       rows={2}
                       className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
                     />
@@ -868,213 +896,120 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                 </div>
               )}
 
-              {channel === 'Work Order' && (
-                <div className="space-y-2 mb-4">
-                  <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold tracking-wide">
-                    QUOTATION HISTORY (Read Only)
-                  </div>
-                  <div className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-xs font-semibold tracking-wide">
-                    WORK ORDER HISTORY
-                  </div>
-                </div>
-              )}
+              {/* Unified remarks feed — all remarks in one chronological list with list/type chips */}
+              <div className="space-y-2">
+                {(() => {
+                  const allVisibleRemarks = editedCard.remarks
+                    .filter(r =>
+                      userRole === 'admin' ||
+                      !r.visibleDepartments ||
+                      (userDepartment ? r.visibleDepartments.includes(userDepartment as Department) : false)
+                    )
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-              <div className="space-y-4">
-                {(channel === 'Work Order' ? [...quotationHistoryLists, ...workOrderHistoryLists] : lists).map(list => {
-                  const allListRemarks = editedCard.remarks.filter(r => r.list === list);
-
-                  // Filter remarks by department visibility for non-admin users
-                  const listRemarks = userRole === 'admin'
-                    ? allListRemarks
-                    : allListRemarks.filter(r =>
-                        !r.visibleDepartments ||
-                        (userDepartment ? r.visibleDepartments.includes(userDepartment as Department) : false)
-                      );
-
-                  return (
-                    <div key={list} className="border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="bg-gray-100 px-4 py-2 flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-700">
-                          {list}
-                          {isReadOnlyQuotationHistoryList(list) && (
-                            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                              Read Only
-                            </span>
-                          )}
-                        </h4>
-                        <span className="text-sm text-gray-500">
-                          {userRole === 'admin' && allListRemarks.length !== listRemarks.length
-                            ? `${listRemarks.length} visible / ${allListRemarks.length} total`
-                            : `${listRemarks.length} remark${listRemarks.length !== 1 ? 's' : ''}`
-                          }
-                        </span>
+                  if (allVisibleRemarks.length === 0) {
+                    return (
+                      <div className="text-center text-gray-400 text-sm py-8 border border-dashed border-gray-200 rounded-lg">
+                        No remarks yet
                       </div>
+                    );
+                  }
 
-                      {listRemarks.length === 0 ? (
-                        <div className="p-4 text-center text-gray-400 text-sm">
-                          No remarks yet
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-gray-200">
-                          {listRemarks.map(remark => (
-                            <div
-                              key={remark.id}
-                              className={`p-4 ${getRemarkColor(remark.type)}`}
-                            >
-                              {editingRemarkId === remark.id ? (
-                                <div className="space-y-3">
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                      <label className="block text-xs font-medium mb-1">
-                                        Type
-                                      </label>
-                                      <select
-                                        value={editRemarkData.type || remark.type}
-                                        onChange={(e) =>
-                                          setEditRemarkData({
-                                            ...editRemarkData,
-                                            type: e.target.value as RemarkType,
-                                          })
-                                        }
-                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                      >
-                                        <option value="Active">Active</option>
-                                        <option value="Pending">Pending</option>
-                                        <option value="Inactive">Inactive</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium mb-1">
-                                        Tags
-                                      </label>
-                                      <input
-                                        type="text"
-                                        value={
-                                          editRemarkData.tags?.join(', ') ||
-                                          remark.tags.join(', ')
-                                        }
-                                        onChange={(e) =>
-                                          setEditRemarkData({
-                                            ...editRemarkData,
-                                            tags: e.target.value
-                                              .split(',')
-                                              .map(t => t.trim()),
-                                          })
-                                        }
-                                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-medium mb-1">
-                                      Description
-                                    </label>
-                                    <textarea
-                                      value={
-                                        editRemarkData.description || remark.description
-                                      }
-                                      onChange={(e) =>
-                                        setEditRemarkData({
-                                          ...editRemarkData,
-                                          description: e.target.value,
-                                        })
-                                      }
-                                      rows={2}
-                                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
-                                    />
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => handleUpdateRemark(remark.id)}
-                                      className="px-3 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600"
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        setEditingRemarkId(null);
-                                        setEditRemarkData({});
-                                      }}
-                                      className="px-3 py-1 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div>
-                                  <div className="flex items-start justify-between mb-2">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span
-                                        className={`px-2 py-1 rounded text-xs font-semibold ${getTypeBadgeColor(
-                                          remark.type
-                                        )}`}
-                                      >
-                                        {remark.type}
-                                      </span>
-                                      <span className="text-xs text-gray-600">
-                                        by {remark.createdBy}
-                                      </span>
-                                      <span className="text-xs text-gray-500">
-                                        {new Date(remark.createdAt).toLocaleString()}
-                                      </span>
-                                      {remark.visibleDepartments && remark.visibleDepartments.length > 0 && (
-                                        <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                                          👁 {remark.visibleDepartments.join(', ')}
-                                        </span>
-                                      )}
-                                    </div>
+                  return allVisibleRemarks.map(remark => {
+                    const isQtnList = quotationHistoryLists.includes(remark.list);
+                    const isReadOnly = isReadOnlyQuotationHistoryList(remark.list);
+                    const listChipCls = isQtnList
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : channel === 'Work Order'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : 'bg-pink-50 text-pink-700 border-pink-200';
 
-                                    <div className="flex gap-1">
-                                      {(userRole === 'admin' ||
-                                        (userRole === 'user' &&
-                                          remark.createdBy === 'user')) &&
-                                        userRole === 'admin' &&
-                                        !isReadOnlyQuotationHistoryList(remark.list) && (
-                                          <>
-                                            <button
-                                              onClick={() => {
-                                                setEditingRemarkId(remark.id);
-                                                setEditRemarkData(remark);
-                                              }}
-                                              className="p-1 hover:bg-white rounded transition-colors"
-                                            >
-                                              <Edit2 className="w-3.5 h-3.5" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleDeleteRemark(remark.id)}
-                                              className="p-1 hover:bg-white rounded transition-colors"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </>
-                                        )}
-                                    </div>
-                                  </div>
-
-                                  {remark.tags.length > 0 && (
-                                    <div className="flex gap-1 mb-2 flex-wrap">
-                                      {remark.tags.map((tag, idx) => (
-                                        <span
-                                          key={idx}
-                                          className="px-2 py-0.5 bg-white bg-opacity-70 rounded-full text-xs"
-                                        >
-                                          #{tag}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  <p className="text-sm">{remark.description}</p>
+                    return (
+                      <div key={remark.id} className={`p-3 rounded-lg border ${getRemarkColor(remark.type)}`}>
+                        {editingRemarkId === remark.id ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium mb-1">Type</label>
+                                <select
+                                  value={editRemarkData.type || remark.type}
+                                  onChange={(e) => setEditRemarkData({ ...editRemarkData, type: e.target.value as RemarkType })}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                >
+                                  <option value="Active">Active</option>
+                                  <option value="Pending">Pending</option>
+                                  <option value="Inactive">Inactive</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium mb-1">Tags</label>
+                                <input
+                                  type="text"
+                                  value={editRemarkData.tags?.join(', ') || remark.tags.join(', ')}
+                                  onChange={(e) => setEditRemarkData({ ...editRemarkData, tags: e.target.value.split(',').map(t => t.trim()) })}
+                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium mb-1">Description</label>
+                              <textarea
+                                value={editRemarkData.description || remark.description}
+                                onChange={(e) => setEditRemarkData({ ...editRemarkData, description: e.target.value })}
+                                rows={2}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleUpdateRemark(remark.id)} className="px-3 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600">Save</button>
+                              <button onClick={() => { setEditingRemarkId(null); setEditRemarkData({}); }} className="px-3 py-1 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-start justify-between mb-1.5 gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${listChipCls}`}>
+                                  {remark.list}{isReadOnly && <span className="opacity-60 font-normal"> · RO</span>}
+                                </span>
+                                {channel !== 'Work Order' && (
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getTypeBadgeColor(remark.type)}`}>
+                                    {remark.type}
+                                  </span>
+                                )}
+                                <span className="text-xs text-gray-500">by {remark.createdBy}</span>
+                                <span className="text-xs text-gray-400">{new Date(remark.createdAt).toLocaleString()}</span>
+                                {remark.visibleDepartments && remark.visibleDepartments.length > 0 && (
+                                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                                    👁 {remark.visibleDepartments.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                              {userRole === 'admin' && !isReadOnly && (
+                                <div className="flex gap-1 shrink-0">
+                                  <button onClick={() => { setEditingRemarkId(remark.id); setEditRemarkData(remark); }} className="p-1 hover:bg-white rounded transition-colors">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => handleDeleteRemark(remark.id)} className="p-1 hover:bg-white rounded transition-colors">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                            {remark.tags.length > 0 && (
+                              <div className="flex gap-1 mb-1.5 flex-wrap">
+                                {remark.tags.map((tag, idx) => (
+                                  <span key={idx} className="px-1.5 py-0.5 bg-white bg-opacity-70 rounded-full text-xs">#{tag}</span>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-sm">{remark.description}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           </div>
@@ -1106,7 +1041,18 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
           existing={card.workOrderDetails}
           canEdit={userRole === 'admin'}
           onSave={(data) => {
-            onUpdate({ ...card, workOrderDetails: data, updatedAt: new Date().toISOString() });
+            const updated: Card = {
+              ...editedCard,
+              workOrderDetails: data,
+              // Sync overlapping WO-form fields back to the card
+              date: data.woDate || editedCard.date,
+              customerCompanyName: data.companyName,
+              customerName: data.companyContactName,
+              projectLocation: data.deliveryLocation || editedCard.projectLocation,
+              updatedAt: new Date().toISOString(),
+            };
+            onUpdate(updated);
+            setEditedCard(updated);
             setShowWOForm(false);
           }}
           onClose={() => setShowWOForm(false)}
