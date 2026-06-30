@@ -418,6 +418,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
   const [remarkAuthor, setRemarkAuthor] = useState('');
   const [remarkMedia, setRemarkMedia] = useState<ScRemarkMedia[]>([]);
   const [workerInput, setWorkerInput] = useState('');
+  const [targetListId, setTargetListId] = useState(listId);
 
   const isDateList = listId.startsWith('delivery-') || listId.startsWith('installation-');
   const isDel = listId.startsWith('delivery-');
@@ -449,6 +450,10 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
     setEc(p => ({ ...p, remarks: [...p.remarks, r] }));
     setRemarkText(''); setRemarkAuthor(''); setRemarkMedia([]);
   };
+
+  useEffect(() => {
+    setTargetListId(listId);
+  }, [listId, card.id]);
 
   // Stage pill colour
   const stagePillCls = stageText.toLowerCase().includes('complet') ? 'bg-green-100 text-green-700 border-green-200'
@@ -603,12 +608,45 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
 
           {/* Action buttons */}
           {isDateList && isTodayCol && !ec.isConfirmed && (
-            <button
-              onClick={() => setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }))}
-              className={`w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 ${isDel ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-            >
-              <CheckCircle className="w-4 h-4" />{isDel ? '✓ Mark Delivered' : '▶ Start Installation'}
-            </button>
+            isDel ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => {
+                    setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }));
+                    setTargetListId(listId);
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700"
+                >
+                  <CheckCircle className="w-4 h-4" />✓ Mark Delivered
+                </button>
+                <button
+                  onClick={() => {
+                    const moved: ScCard = {
+                      ...ec,
+                      // Move as a fresh pending-installation card (not scheduled/started)
+                      isConfirmed: false,
+                      confirmedDate: undefined,
+                      scheduleType: 'Installation',
+                      completedDate: undefined,
+                    };
+                    setEc(moved);
+                    setTargetListId('pending-installation');
+                    onSave(moved, 'pending-installation');
+                    onClose();
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <CheckCircle className="w-4 h-4" />Mark Delivered & send to Installation
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }))}
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+              >
+                <CheckCircle className="w-4 h-4" />▶ Start Installation
+              </button>
+            )
           )}
           {isDateList && ec.isConfirmed && (
             <div className="flex items-center gap-2.5 px-4 py-2.5 bg-green-50 border border-green-200 rounded-xl">
@@ -726,7 +764,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
             Cancel
           </button>
           <button
-            onClick={() => { onSave(ec, listId); onClose(); }}
+            onClick={() => { onSave(ec, targetListId); onClose(); }}
             className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors"
           >
             Save Changes
@@ -787,7 +825,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     workOrderCardsRef.current = workOrderCards;
   }, [workOrderCards]);
 
-  const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard) => {
+  const syncScheduleCardToWorkOrder = useCallback(async (sc: ScCard, forcedScheduleType?: 'Delivery' | 'Installation') => {
     if (!sc.sourceCardId) return;
     let src = workOrderCardsRef.current.find(c => String(c.id) === String(sc.sourceCardId));
     if (!src) {
@@ -804,17 +842,26 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const scheduleStage = getScheduleStage(sc, sc.listId);
     const srcStage = src.scheduleStage;
     const srcPayment = typeof src.paymentPercent === 'number' ? src.paymentPercent : 0;
-    if (srcPayment === sc.paymentPercent && srcStage === scheduleStage) {
+    const nextScheduleType = forcedScheduleType ?? src.scheduleType;
+    if (srcPayment === sc.paymentPercent && srcStage === scheduleStage && src.scheduleType === nextScheduleType) {
       return;
     }
-    // IMPORTANT: Do NOT sync scheduleType back to Work Order.
-    // Work Order is the authority for scheduleType; Schedule channel only reports stage.
+    // Normally WO is the authority for scheduleType, but explicit list-based moves
+    // (e.g. delivered -> pending-installation) must persist type to prevent bounce-back on poll.
     const updated: WorkOrderCard = {
       ...src,
       paymentPercent: sc.paymentPercent,
+      scheduleType: nextScheduleType,
       scheduleStage,
       updatedAt: new Date().toISOString(),
     };
+    // Optimistically update workOrderCardsRef BEFORE the async PUT so that any
+    // mergeScheduleWithWorkOrder call happening during the in-flight request
+    // already sees the new scheduleType and does not bounce the card back.
+    workOrderCardsRef.current = workOrderCardsRef.current.map(c =>
+      String(c.id) === String(updated.id) ? updated : c
+    );
+    setWorkOrderCards(prev => prev.map(c => String(c.id) === String(updated.id) ? updated : c));
     try {
       const uid = localStorage.getItem('userId');
       const saved = await updateCard(updated, uid ? Number(uid) : undefined);
@@ -1397,8 +1444,25 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       {/* Modals */}
       {addCardType&&<AddCardModal type={addCardType} onClose={()=>setAddCardType(null)} onAdd={c=>setStore(prev=>({...prev,[c.listId]:[...(prev[c.listId]??[]),c]}))}/>}
       {selected&&<CardDetailModal card={selected.card} listId={selected.listId} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
-        setStore(prev=>({...prev,[lid]:(prev[lid]??[]).map(c=>c.id===u.id?u:c)}));
-        void syncScheduleCardToWorkOrder(u);
+        setStore(prev => {
+          const sourceList = selected.listId;
+          const next: ScStore = { ...prev };
+          next[sourceList] = (next[sourceList] ?? []).filter(c => c.id !== u.id);
+          const destination = next[lid] ?? [];
+          if (destination.some(c => c.id === u.id)) {
+            next[lid] = destination.map(c => c.id === u.id ? { ...u, listId: lid } : c);
+          } else {
+            next[lid] = [{ ...u, listId: lid }, ...destination];
+          }
+          return next;
+        });
+        const forcedType: 'Delivery' | 'Installation' | undefined =
+          (lid === 'pending-installation' || lid.startsWith('installation-'))
+            ? 'Installation'
+            : (lid === 'pending-delivery' || lid.startsWith('delivery-'))
+              ? 'Delivery'
+              : undefined;
+        void syncScheduleCardToWorkOrder({ ...u, listId: lid }, forcedType);
       }}/>} 
       {pendingDrop&&(
         <WorkersModal destId={pendingDrop.dstId}

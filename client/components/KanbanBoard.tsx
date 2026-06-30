@@ -113,7 +113,6 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       onUpdateCard={handleUpdateCard}
       onAssignUser={handleAssignUser}
       onUpdateWorkStatus={handleUpdateWorkStatus}
-      onSwitchScheduleType={activeChannel === 'Work Order' ? handleSwitchScheduleType : undefined}
       userRole={userRole}
       userDepartment={userDepartment}
       className={className}
@@ -705,21 +704,6 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     if (selectedCard?.id === cardId) {
       setSelectedCard(updatedCard);
     }
-  };
-
-  const handleSwitchScheduleType = (cardId: string, newType: 'Delivery' | 'Installation') => {
-    const movedCard = cards.find(c => c.id === cardId);
-    if (!movedCard) return;
-    const newStage = newType === 'Installation' ? 'Pending installation' : 'Pending delivery';
-    const updatedCard = {
-      ...movedCard,
-      scheduleType: newType as CardType['scheduleType'],
-      scheduleStage: newStage as CardType['scheduleStage'],
-      updatedAt: new Date().toISOString(),
-    };
-    const updatedCards = cards.map(c => c.id === cardId ? updatedCard : c);
-    setCards(updatedCards);
-    if (selectedCard?.id === cardId) setSelectedCard(updatedCard);
   };
 
   const onDragEnd = (result: DropResult) => {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Send, ArrowRightLeft } from 'lucide-react';
+import { Edit2, Trash2, Clock, User, CheckCircle, XCircle, FileText, Send } from 'lucide-react';
 import { Card, ListType, RemarkType, AppUser, UserWorkStatus, Department, ChannelType, DEPARTMENTS, isWorkOrderList, normalizeListType } from '@/types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Draggable } from '@hello-pangea/dnd';
@@ -18,13 +18,12 @@ interface Props {
   onUpdateCard?: (card: Card) => void;
   onAssignUser?: (cardId: string, userName: string | undefined) => void;
   onUpdateWorkStatus?: (cardId: string, status: UserWorkStatus) => void;
-  onSwitchScheduleType?: (cardId: string, newType: 'Delivery' | 'Installation') => void;
   userRole: 'admin' | 'user';
   userDepartment?: Department | '';
   currentList: ListType;
 }
 
-export default function KanbanCard({ card, index, onClick, onDelete, onApprove, onTerminate, onUnterminate, onComplete, onRevise, onUpdateCard, onAssignUser, onUpdateWorkStatus, onSwitchScheduleType, userRole, userDepartment, currentList }: Props) {
+export default function KanbanCard({ card, index, onClick, onDelete, onApprove, onTerminate, onUnterminate, onComplete, onRevise, onUpdateCard, onAssignUser, onUpdateWorkStatus, userRole, userDepartment, currentList }: Props) {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [assignDeptFilter, setAssignDeptFilter] = useState<Department | ''>('');
   const [pendingAssignee, setPendingAssignee] = useState<string>(card.assignedTo || '');
@@ -493,36 +492,6 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
       ) : (
         <div className="text-xs text-gray-400 italic">
           No remarks for this list yet
-        </div>
-      )}
-
-      {/* Schedule Type Switch — only on expanded WO Schedule cards */}
-      {isScheduledWorkOrderCard && onSwitchScheduleType && (
-        <div className="mt-3 pt-2 border-t border-gray-100 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <ArrowRightLeft className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-          <span className="text-[11px] text-gray-500 font-medium flex-shrink-0">Switch type:</span>
-          {card.scheduleType === 'Delivery' ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onSwitchScheduleType(card.id, 'Installation'); }}
-              disabled={card.scheduleStage !== 'Delivery completed'}
-              title={card.scheduleStage !== 'Delivery completed' ? `Available after Delivery completed (current: ${card.scheduleStage ?? 'Pending delivery'})` : 'Switch this card to Installation'}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
-                card.scheduleStage === 'Delivery completed'
-                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white cursor-pointer'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              Delivery → Installation
-            </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onSwitchScheduleType(card.id, 'Delivery'); }}
-              title="Switch this card back to Delivery"
-              className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer transition-colors"
-            >
-              Installation → Delivery
-            </button>
-          )}
         </div>
       )}
 
