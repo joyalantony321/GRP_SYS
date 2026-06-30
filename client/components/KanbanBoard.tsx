@@ -44,12 +44,19 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   const [currentWeek, setCurrentWeek] = useState(new Date());
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
   const [showApprovedCardsModal, setShowApprovedCardsModal] = useState(false);
+  const [pendingScheduleChoice, setPendingScheduleChoice] = useState<{
+    srcId: string;
+    dstId: string;
+    cardId: string;
+    dstIdx: number;
+  } | null>(null);
   const channelDropdownRef = useRef<HTMLDivElement>(null);
   const dateFilterRef = useRef<HTMLDivElement>(null);
 
   // Pre-create dialog for WO channel / Work Order list (Technical dept only)
   const [woPreCreate, setWOPreCreate] = useState<{
     list: ListType;
+    scheduleType?: 'Delivery' | 'Installation';
     woNumber: string;
     companyCode: string;
     poFile: { name: string; raw: File } | null;
@@ -93,7 +100,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     <KanbanList
       key={list}
       list={list}
-      cards={filteredCards.filter(card => normalizeListType(card.list) === list)}
+      cards={list === 'Schedule'
+        ? sortScheduleCards(filteredCards.filter(card => normalizeListType(card.list) === list))
+        : filteredCards.filter(card => normalizeListType(card.list) === list)}
       onCardClick={openExistingCard}
       onDeleteCard={handleDeleteCard}
       onApproveCard={handleApproveCard}
@@ -104,11 +113,33 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       onUpdateCard={handleUpdateCard}
       onAssignUser={handleAssignUser}
       onUpdateWorkStatus={handleUpdateWorkStatus}
+      onSwitchScheduleType={activeChannel === 'Work Order' ? handleSwitchScheduleType : undefined}
       userRole={userRole}
       userDepartment={userDepartment}
       className={className}
     />
   );
+
+  const sortScheduleCards = (inputCards: CardType[]) => {
+    const currentScheduleEntry = (card: CardType) => {
+      const history = card.listHistory ?? [];
+      const entry = [...history].reverse().find(item => normalizeListType(item.list) === 'Schedule');
+      return Date.parse(entry?.enteredAt ?? card.updatedAt ?? card.createdAt ?? '') || 0;
+    };
+
+    const emergencyFlag = (card: CardType) => (card as CardType & { isEmergency?: boolean }).isEmergency === true;
+    const cardCode = (card: CardType) => card.workOrderNumber || card.quoteNumber || card.id;
+
+    return [...inputCards].sort((left, right) => {
+      const leftType = left.scheduleType ?? 'Delivery';
+      const rightType = right.scheduleType ?? 'Delivery';
+      if (leftType !== rightType) return leftType === 'Delivery' ? -1 : 1;
+      if (emergencyFlag(left) !== emergencyFlag(right)) return emergencyFlag(left) ? -1 : 1;
+      const timeDiff = currentScheduleEntry(left) - currentScheduleEntry(right);
+      if (timeDiff !== 0) return timeDiff;
+      return cardCode(left).localeCompare(cardCode(right));
+    });
+  };
 
   // Reset remark filter when switching channels (they have different filter options)
   useEffect(() => {
@@ -358,7 +389,14 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   const handleAddCard = async (list: ListType) => {
     // ALL Work Order channel cards require PO doc before creation
     if (activeChannel === 'Work Order') {
-      setWOPreCreate({ list, woNumber: '', companyCode: 'GRP', poFile: null, qtnFile: null });
+      setWOPreCreate({
+        list,
+        scheduleType: list === 'Schedule' ? 'Delivery' : undefined,
+        woNumber: '',
+        companyCode: 'GRP',
+        poFile: null,
+        qtnFile: null,
+      });
       return;
     }
     const _now = new Date().toISOString();
@@ -408,6 +446,12 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const _woNow = new Date().toISOString();
     const uid = localStorage.getItem('userId');
     const performedBy = uid ? Number(uid) : undefined;
+    const scheduleType: 'Delivery' | 'Installation' | undefined =
+      woPreCreate.list === 'Schedule' ? woPreCreate.scheduleType : undefined;
+    if (woPreCreate.list === 'Schedule' && !scheduleType) return;
+    const scheduleStage = woPreCreate.list === 'Schedule'
+      ? (scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery')
+      : undefined;
     const newCard: CardType = {
       id: Date.now().toString(),
       quoteNumber: '',
@@ -419,6 +463,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       subject: '',
       projectLocation: '',
       list: woPreCreate.list,
+      scheduleType,
+      scheduleStage,
       channel: 'Work Order',
       companyCode: woPreCreate.companyCode || 'GRP',
       remarks: [],
@@ -683,28 +729,12 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const movedCard = cards.find(card => card.id === cardId);
     if (!movedCard) return;
 
-    // Update card with new list and timestamp; append to listHistory
-    const moveTime = new Date().toISOString();
-    const updatedCard = {
-      ...movedCard,
-      list: destList,
-      updatedAt: moveTime,
-      listHistory: [
-        ...(movedCard.listHistory ?? [{ list: movedCard.list, enteredAt: movedCard.createdAt }]),
-        { list: destList, enteredAt: moveTime },
-      ],
-    };
-
-    const updatedCards = cards.map(card =>
-      card.id === cardId ? updatedCard : card
-    );
-
-    setCards(updatedCards);
-
-    // Update selected card if it's the one being moved
-    if (selectedCard?.id === cardId) {
-      setSelectedCard(updatedCard);
+    if (destList === 'Schedule' && sourceList !== 'Schedule') {
+      setPendingScheduleChoice({ srcId: sourceList, dstId: destList, cardId, dstIdx: destination.index });
+      return;
     }
+
+    applyCardMove(cardId, destList, movedCard.scheduleType);
   };
 
   return (
@@ -1057,10 +1087,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 {lists.includes('Work Order') ? renderKanbanList('Work Order', 'h-full min-h-0') : <div />}
                 {lists.includes('Approval') ? renderKanbanList('Approval', 'h-full min-h-0') : <div />}
                 {lists.includes('Payments') ? renderKanbanList('Payments', 'h-full min-h-0') : <div />}
-                <div className="flex min-h-0 flex-col gap-3 xl:h-full">
-                  {lists.includes('Delivery') ? renderKanbanList('Delivery', 'flex-1 min-h-0') : <div className="flex-1" />}
-                  {lists.includes('Installation') ? renderKanbanList('Installation', 'flex-1 min-h-0') : <div className="flex-1" />}
-                </div>
+                {lists.includes('Schedule') ? renderKanbanList('Schedule', 'h-full min-h-0 border-2 border-amber-200 bg-amber-50/40 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]') : <div />}
               </div>
             ) : (
               <div className="flex gap-3 h-full w-full">
@@ -1286,8 +1313,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
           'Work Order':   '#7c3aed',  // deep violet
           'Approval':     '#0d9488',  // teal
           'Payments':     '#0891b2',  // sky
-          'Delivery':     '#ef4444',  // red
-          'Installation': '#16a34a',  // forest green
+          'Schedule':     '#f59e0b',  // amber
+          'Delivery':     '#ef4444',  // legacy red
+          'Installation': '#16a34a',  // legacy green
         };
         const LIST_BG: Record<string, string> = {
           'Quotation':    'bg-blue-100 text-blue-700',
@@ -1297,6 +1325,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
           'Work Order':   'bg-purple-100 text-purple-700',
           'Approval':     'bg-teal-100 text-teal-700',
           'Payments':     'bg-sky-100 text-sky-700',
+          'Schedule':     'bg-amber-100 text-amber-700',
           'Delivery':     'bg-amber-100 text-amber-700',
           'Installation': 'bg-green-100 text-green-700',
         };
@@ -1514,6 +1543,41 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         />
       )}
 
+      {pendingScheduleChoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h3 className="text-base font-semibold text-gray-900">Choose Schedule Type</h3>
+              <p className="text-sm text-gray-500 mt-1">Pick how this card should appear in Schedule.</p>
+            </div>
+            <div className="p-4 grid grid-cols-2 gap-3">
+              <button
+                onClick={() => { applyCardMove(pendingScheduleChoice.cardId, 'Schedule', 'Delivery'); setPendingScheduleChoice(null); }}
+                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-left hover:bg-amber-100 transition-colors"
+              >
+                <div className="text-sm font-semibold text-amber-800">Delivery</div>
+                <div className="text-xs text-amber-700 mt-1">Pending delivery</div>
+              </button>
+              <button
+                onClick={() => { applyCardMove(pendingScheduleChoice.cardId, 'Schedule', 'Installation'); setPendingScheduleChoice(null); }}
+                className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-left hover:bg-emerald-100 transition-colors"
+              >
+                <div className="text-sm font-semibold text-emerald-800">Installation</div>
+                <div className="text-xs text-emerald-700 mt-1">Pending installation</div>
+              </button>
+            </div>
+            <div className="px-4 pb-4 flex justify-end">
+              <button
+                onClick={() => setPendingScheduleChoice(null)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quotation Revision — enter Revision Number */}
       {revisionPending && (() => {
         const card = cards.find(c => c.id === revisionPending.cardId);
@@ -1704,7 +1768,14 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                 </div>
                 <select
                   value={woPreCreate.list}
-                  onChange={(e) => setWOPreCreate(p => p ? { ...p, list: e.target.value as ListType } : null)}
+                  onChange={(e) => {
+                    const nextList = e.target.value as ListType;
+                    setWOPreCreate(p => p ? {
+                      ...p,
+                      list: nextList,
+                      scheduleType: nextList === 'Schedule' ? (p.scheduleType ?? 'Delivery') : undefined,
+                    } : null);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                 >
                   {WORK_ORDER_LISTS.map(stage => {
@@ -1717,6 +1788,39 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                   })}
                 </select>
               </div>
+
+              {woPreCreate.list === 'Schedule' && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-sm font-semibold text-gray-800">Schedule Type</span>
+                    <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Required</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWOPreCreate(p => p ? { ...p, scheduleType: 'Delivery' } : null)}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
+                        woPreCreate.scheduleType === 'Delivery'
+                          ? 'border-amber-300 bg-amber-50 text-amber-800'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Delivery pending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWOPreCreate(p => p ? { ...p, scheduleType: 'Installation' } : null)}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
+                        woPreCreate.scheduleType === 'Installation'
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Installation pending
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Work Order Number — required */}
               <div>
@@ -1803,10 +1907,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
               <button onClick={() => setWOPreCreate(null)} className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
               <button
-                disabled={!woPreCreate.poFile || !woPreCreate.woNumber.trim()}
+                disabled={!woPreCreate.poFile || !woPreCreate.woNumber.trim() || (woPreCreate.list === 'Schedule' && !woPreCreate.scheduleType)}
                 onClick={handleWOPreCreateConfirm}
                 className={`px-5 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  woPreCreate.poFile && woPreCreate.woNumber.trim()
+                  woPreCreate.poFile && woPreCreate.woNumber.trim() && (woPreCreate.list !== 'Schedule' || !!woPreCreate.scheduleType)
                     ? 'bg-orange-500 hover:bg-orange-600 text-white'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
