@@ -843,9 +843,22 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const srcStage = src.scheduleStage;
     const srcPayment = typeof src.paymentPercent === 'number' ? src.paymentPercent : 0;
     const nextScheduleType = forcedScheduleType ?? src.scheduleType;
+    // Determine whether completedAt needs to be stamped before hitting the
+    // stable-guard return.  This covers both new transitions AND pre-existing
+    // completed cards (e.g. GRP/1983) that were completed before completedAt
+    // tracking was introduced.
+    const terminalStages: ReadonlyArray<string> = ['Delivery completed', 'Installation completed'];
+    const nowTerminal = terminalStages.includes(scheduleStage);
+    const needsCompletedAt = nowTerminal && !src.completedAt;
     if (srcPayment === sc.paymentPercent && srcStage === scheduleStage && src.scheduleType === nextScheduleType) {
-      return;
+      // If the card is terminal but completedAt hasn't been stamped yet, we
+      // must proceed past this guard so the update writes completedAt once.
+      // After that, subsequent stable polls hit this return as normal.
+      if (!needsCompletedAt) return;
     }
+    // Stamp completedAt for any terminal card that doesn't have it yet.
+    const newCompletedAt: string | undefined =
+      needsCompletedAt ? new Date().toISOString() : src.completedAt;
     // Normally WO is the authority for scheduleType, but explicit list-based moves
     // (e.g. delivered -> pending-installation) must persist type to prevent bounce-back on poll.
     const updated: WorkOrderCard = {
@@ -853,6 +866,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       paymentPercent: sc.paymentPercent,
       scheduleType: nextScheduleType,
       scheduleStage,
+      completedAt: newCompletedAt,
       updatedAt: new Date().toISOString(),
     };
     // Optimistically update workOrderCardsRef BEFORE the async PUT so that any

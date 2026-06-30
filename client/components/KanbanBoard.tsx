@@ -23,6 +23,77 @@ type ViewMode = 'kanban' | 'table' | 'gantt';
 type DateFilter = 'all' | 'day' | 'week' | 'month';
 type RemarkFilter = 'all' | 'Active' | 'Pending' | 'Inactive' | 'Terminated' | 'Approved' | 'Exported' | 'Created' | 'WO_Completed';
 
+// ─── Card Visibility Helpers ──────────────────────────────────────────────────
+// These helpers enforce the Day-filter visibility rules for both the Admin and
+// regular users. No separate logic per role — both always see the same cards.
+//
+// Week / Month / All-Time filters do NOT call these helpers, so completed cards
+// remain visible as historical records in those views.
+
+/**
+ * Returns the calendar date (yyyy-MM-dd) when a Quotation card was finally
+ * resolved (Approved or Terminated). Reads assignmentHistory first for an
+ * accurate timestamp, then falls back to updatedAt.
+ */
+function getQuotationCompletionDate(card: CardType): string | null {
+  if (!card.approved && !card.terminated) return null;
+  const targetAction: 'Approved' | 'Terminated' = card.approved ? 'Approved' : 'Terminated';
+  const history = card.assignmentHistory ?? [];
+  const entry = [...history].reverse().find(h => h.action === targetAction);
+  const ts = entry?.assignedAt ?? card.updatedAt;
+  if (!ts) return null;
+  try { return format(parseISO(ts), 'yyyy-MM-dd'); } catch { return null; }
+}
+
+/**
+ * Returns the calendar date (yyyy-MM-dd) when a Work Order card was
+ * schedule-completed.
+ *
+ * Completion is defined as:
+ *   - Delivery Only  : scheduleStage === 'Delivery completed'
+ *   - Delivery + Inst: scheduleStage === 'Installation completed'
+ *   - Legacy list    : completedAt is set
+ *
+ * Uses updatedAt as the proxy date for schedule-stage completions since the
+ * ScheduleBoard syncs the stage change together with updatedAt.
+ */
+function getWorkOrderCompletionDate(card: CardType): string | null {
+  if (card.completedAt) {
+    try { return format(parseISO(card.completedAt), 'yyyy-MM-dd'); } catch { return null; }
+  }
+  if (
+    card.scheduleStage === 'Delivery completed' ||
+    card.scheduleStage === 'Installation completed'
+  ) {
+    try { return format(parseISO(card.updatedAt), 'yyyy-MM-dd'); } catch { return null; }
+  }
+  return null;
+}
+
+/**
+ * Returns true when a card should be shown in the Day (Today) filter for the
+ * given calendar day string (yyyy-MM-dd).
+ *
+ * Rules (identical for Admin and regular users):
+ *   Quotation  – hide if approved/terminated AND completion date < dayStr
+ *   Work Order – hide if delivery/installation completed AND completion date < dayStr
+ *   Other      – always visible
+ */
+function isCardVisibleOnDay(
+  card: CardType,
+  channel: ChannelType,
+  dayStr: string,
+): boolean {
+  if (channel === 'Quotation') {
+    const completionDate = getQuotationCompletionDate(card);
+    if (completionDate !== null && completionDate < dayStr) return false;
+  } else if (channel === 'Work Order') {
+    const completionDate = getWorkOrderCompletionDate(card);
+    if (completionDate !== null && completionDate < dayStr) return false;
+  }
+  return true;
+}
+
 export default function KanbanBoard({ cards, setCards, userRole, userName, userDepartment, activeChannel, accessibleChannels, onChannelSwitch, onCreateInChannel, onAdminSettings }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [dateFilter, setDateFilter] = useState<DateFilter>('day');
@@ -184,7 +255,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
 
     if (dateFilter === 'day') {
       const dayStr = dayDate || format(new Date(), 'yyyy-MM-dd');
-      return cards.filter(card => format(parseISO(card.date), 'yyyy-MM-dd') === dayStr);
+      // Include every card that existed on or before the selected day.
+      // Cards completed/approved/terminated before that day are hidden by
+      // the isCardVisibleOnDay rule that runs immediately after this filter.
+      return cards.filter(card => format(parseISO(card.date), 'yyyy-MM-dd') <= dayStr);
     }
 
     if (dateFilter === 'week') {
@@ -256,15 +330,14 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   const filteredCards = useMemo(() => {
     let filtered = cards;
 
-    // Filter by user assignment: users only see cards currently assigned to them.
-    // The fallback (unassigned + created by user) only applies when the card has
-    // never been forwarded to anyone else — avoids showing stale cards to senders.
+    // ── 1. Assignment filter (non-admin only) ──────────────────────────────
+    // Users only see cards currently assigned to them, or cards they created
+    // that have never been forwarded to anyone else.
     if (userRole === 'user') {
       filtered = filtered.filter(card => {
         if (card.assignedTo === userName) return true;
         // Only show an unassigned card to the user if it was self-created AND
-        // has never been assigned to a different person (i.e. history only has
-        // self-assignments, meaning it was never forwarded away).
+        // has never been assigned to a different person.
         if (!card.assignedTo) {
           const history = card.assignmentHistory ?? [];
           const wasForwardedToOther = history.some(h => h.assignedTo && h.assignedTo !== userName);
@@ -273,31 +346,22 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         }
         return false;
       });
-      
-      // Apply date filtering for terminated/approved/completed cards only
-      const now = new Date();
-      filtered = filtered.filter(card => {
-        // Completed cards: only show on the completion day, never carry to next day
-        if (card.completedAt) {
-          const completedDate = parseISO(card.completedAt);
-          return differenceInDays(now, completedDate) <= 0;
-        }
-        // If terminated or approved, only show on the same day (don't carry forward)
-        if (card.terminated || card.approved) {
-          const cardDate = parseISO(card.date);
-          if (dateFilter === 'day') {
-            return format(cardDate, 'yyyy-MM-dd') === (dayDate || format(now, 'yyyy-MM-dd'));
-          }
-          return format(cardDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
-        }
-        // Active cards always show
-        return true;
-      });
-    } else {
-      filtered = filterCardsByDate(filtered);
     }
 
-    // Apply user filter (admin only)
+    // ── 2. Date range filter (all users) ───────────────────────────────────
+    filtered = filterCardsByDate(filtered);
+
+    // ── 3. Day-filter visibility rules — applied equally to Admin and User ─
+    // Only the Day ("Today") filter hides completed/approved/terminated cards
+    // whose completion date has already passed.
+    // Week / Month / All-Time filters never hide completed cards so that
+    // historical records remain accessible.
+    if (dateFilter === 'day') {
+      const dayStr = dayDate || format(new Date(), 'yyyy-MM-dd');
+      filtered = filtered.filter(card => isCardVisibleOnDay(card, activeChannel, dayStr));
+    }
+
+    // ── 4. Admin user filter ───────────────────────────────────────────────
     if (userRole === 'admin' && userFilter !== 'all') {
       if (userFilter === 'unassigned') {
         filtered = filtered.filter(card => !card.assignedTo);
@@ -306,12 +370,12 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       }
     }
 
-    // Apply work status filter
+    // ── 5. Work status filter ──────────────────────────────────────────────
     if (workStatusFilter !== 'all') {
       filtered = filtered.filter(card => card.userWorkStatus === workStatusFilter);
     }
 
-    // Apply remark type filter
+    // ── 6. Remark type filter ──────────────────────────────────────────────
     if (remarkTypeFilter !== 'all') {
       if (activeChannel === 'Work Order') {
         // WO channel: filter by card origin / completion status
@@ -341,12 +405,13 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       }
     }
 
+    // ── 7. Search ──────────────────────────────────────────────────────────
     if (quoteSearch) {
       filtered = filtered.filter(card => cardMatchesSearch(card, quoteSearch));
     }
 
     return filtered;
-  }, [cards, quoteSearch, dateFilter, dayDate, weekEndDate, weekRangeDays, monthFilterYear, monthFilterMonth, userRole, userName, userFilter, workStatusFilter, remarkTypeFilter]);
+  }, [cards, quoteSearch, dateFilter, dayDate, weekEndDate, weekRangeDays, monthFilterYear, monthFilterMonth, userRole, userName, userFilter, workStatusFilter, remarkTypeFilter, activeChannel]);
 
   const approvedQuotationCards = useMemo(() => {
     if (activeChannel !== 'Quotation') return [] as CardType[];
