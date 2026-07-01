@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Edit2, Save, Trash2, Plus, Check, FileText } from 'lucide-react';
-import { Card, ListType, Remark, RemarkType, Department, ChannelType, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists } from '@/types';
+import { Card, ListType, Remark, RemarkType, Department, ChannelType, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists, WorkOrderFormData, defaultWorkOrderForm } from '@/types';
 import WorkOrderFormModal from './WorkOrderFormModal';
 import OrderConfirmationModal from './OrderConfirmationModal';
 import { uploadDocument, deleteDocument, docUrl } from '@/lib/api';
@@ -36,6 +36,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   const [showWOForm, setShowWOForm] = useState(false);
   const [showOCForm, setShowOCForm] = useState(false);
   const [docUploading, setDocUploading] = useState<Record<string, boolean>>({});
+  const [workOrderForm, setWorkOrderForm] = useState<WorkOrderFormData>(() => (
+    card.workOrderDetails ?? defaultWorkOrderForm(card.workOrderNumber || '0000', card.salesPerson)
+  ));
 
   const quotationHistoryLists: ListType[] = ['Quotation', 'Submittal', 'Review', 'LPO'];
   const workOrderHistoryLists = lists.filter(l => !quotationHistoryLists.includes(l));
@@ -44,7 +47,18 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
   useEffect(() => {
     setEditedCard(card);
+    setWorkOrderForm(card.workOrderDetails ?? defaultWorkOrderForm(card.workOrderNumber || '0000', card.salesPerson));
   }, [card]);
+
+  const applyWorkOrderSync = (nextForm: WorkOrderFormData, baseCard: Card = editedCard) => ({
+    ...baseCard,
+    date: nextForm.woDate || baseCard.date,
+    customerCompanyName: nextForm.companyName,
+    customerName: nextForm.companyContactName,
+    projectLocation: nextForm.deliveryLocation || baseCard.projectLocation,
+    workOrderDetails: nextForm,
+    updatedAt: new Date().toISOString(),
+  });
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
   const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
@@ -340,9 +354,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         onChange={(e) => {
                           const d = e.target.value;
                           setEditedCard(prev => {
-                            const next = { ...prev, date: d };
-                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, woDate: d };
-                            return next;
+                            const nextWorkOrderForm = { ...workOrderForm, woDate: d };
+                            setWorkOrderForm(nextWorkOrderForm);
+                            return applyWorkOrderSync(nextWorkOrderForm, { ...prev, date: d });
                           });
                         }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
@@ -365,9 +379,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         onChange={(e) => {
                           const v = e.target.value;
                           setEditedCard(prev => {
-                            const next = { ...prev, customerName: v };
-                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, companyContactName: v };
-                            return next;
+                            const nextWorkOrderForm = { ...workOrderForm, companyContactName: v };
+                            setWorkOrderForm(nextWorkOrderForm);
+                            return applyWorkOrderSync(nextWorkOrderForm, { ...prev, customerName: v });
                           });
                         }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
@@ -381,9 +395,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         onChange={(e) => {
                           const v = e.target.value;
                           setEditedCard(prev => {
-                            const next = { ...prev, customerCompanyName: v };
-                            if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, companyName: v };
-                            return next;
+                            const nextWorkOrderForm = { ...workOrderForm, companyName: v };
+                            setWorkOrderForm(nextWorkOrderForm);
+                            return applyWorkOrderSync(nextWorkOrderForm, { ...prev, customerCompanyName: v });
                           });
                         }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
@@ -482,9 +496,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       onChange={(e) => {
                         const v = e.target.value;
                         setEditedCard(prev => {
-                          const next = { ...prev, projectLocation: v };
-                          if (next.workOrderDetails) next.workOrderDetails = { ...next.workOrderDetails, deliveryLocation: v };
-                          return next;
+                          const nextWorkOrderForm = { ...workOrderForm, deliveryLocation: v };
+                          setWorkOrderForm(nextWorkOrderForm);
+                          return applyWorkOrderSync(nextWorkOrderForm, { ...prev, projectLocation: v });
                         });
                       }}
                       rows={2}
@@ -1038,21 +1052,13 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
           companyCode={card.companyCode || 'GRP'}
           salesPerson={card.salesPerson}
           quoteNumber={card.quoteNumber}
-          existing={card.workOrderDetails}
+          existing={workOrderForm}
           canEdit={userRole === 'admin'}
           onSave={(data) => {
-            const updated: Card = {
-              ...editedCard,
-              workOrderDetails: data,
-              // Sync overlapping WO-form fields back to the card
-              date: data.woDate || editedCard.date,
-              customerCompanyName: data.companyName,
-              customerName: data.companyContactName,
-              projectLocation: data.deliveryLocation || editedCard.projectLocation,
-              updatedAt: new Date().toISOString(),
-            };
+            const updated: Card = applyWorkOrderSync(data, editedCard);
             onUpdate(updated);
             setEditedCard(updated);
+            setWorkOrderForm(data);
             setShowWOForm(false);
           }}
           onClose={() => setShowWOForm(false)}

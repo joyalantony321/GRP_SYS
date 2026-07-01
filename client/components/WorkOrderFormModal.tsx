@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Plus, Trash2, Save } from 'lucide-react';
 import { WorkOrderFormData, WorkOrderItem, defaultWorkOrderForm } from '@/types';
 
@@ -77,6 +77,10 @@ export default function WorkOrderFormModal({
     existing ?? defaultWorkOrderForm(workOrderNumber, salesPerson)
   );
 
+  useEffect(() => {
+    setForm(existing ?? defaultWorkOrderForm(workOrderNumber, salesPerson));
+  }, [existing, workOrderNumber, salesPerson]);
+
   const set = <K extends keyof WorkOrderFormData>(key: K, value: WorkOrderFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -84,21 +88,29 @@ export default function WorkOrderFormModal({
     const updated = form.items.map((item, i) =>
       i === index ? { ...item, [field]: value } : item
     );
-    set('items', updated);
+    setForm((prev) => ({ ...prev, items: updated }));
   };
 
   const addItem = () => {
-    set('items', [
-      ...form.items,
-      { slNo: form.items.length + 1, itemDescription: '', qty: '', remarks: '' },
-    ]);
+    setForm((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        { slNo: prev.items.length + 1, itemDescription: '', qty: '', remarks: '' },
+      ],
+    }));
   };
 
   const removeItem = (index: number) => {
-    const updated = form.items
-      .filter((_, i) => i !== index)
-      .map((item, i) => ({ ...item, slNo: i + 1 }));
-    set('items', updated.length ? updated : [{ slNo: 1, itemDescription: '', qty: '', remarks: '' }]);
+    setForm((prev) => {
+      const updated = prev.items
+        .filter((_, i) => i !== index)
+        .map((item, i) => ({ ...item, slNo: i + 1 }));
+      return {
+        ...prev,
+        items: updated.length ? updated : [{ slNo: 1, itemDescription: '', qty: '', remarks: '' }],
+      };
+    });
   };
 
   const disabled = !canEdit;
