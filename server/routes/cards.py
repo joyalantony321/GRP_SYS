@@ -99,6 +99,40 @@ class OrderConfirmationIn(BaseModel):
     manager_name: Optional[str] = None
 
 
+class WorkOrderDetailsIn(BaseModel):
+    wo_date: Optional[str] = None
+    customer_id: Optional[str] = None
+    invoice_no: Optional[str] = None
+    invoice_date: Optional[str] = None
+    brand: Optional[str] = None
+    company_name: Optional[str] = None
+    company_contact_name: Optional[str] = None
+    company_address: Optional[str] = None
+    company_phone: Optional[str] = None
+    company_email: Optional[str] = None
+    delivery_date: Optional[str] = None
+    delivery_location: Optional[str] = None
+    delivery_contact_name: Optional[str] = None
+    delivery_contact_number: Optional[str] = None
+    installation_completion_date: Optional[str] = None
+    type_insulated: bool = False
+    type_non_insulated: bool = False
+    skid_hollow: bool = False
+    skid_i_beam: bool = False
+    indicator_tube: bool = False
+    indicator_scale: bool = False
+    ladder_internal: bool = False
+    ladder_external: bool = False
+    support_internal: bool = False
+    support_external: bool = False
+    supply: bool = False
+    installation: bool = False
+    testing_commissioning: bool = False
+    maintenance: bool = False
+    job_description: Optional[str] = None
+    items: List[dict] = []
+
+
 class CardIn(BaseModel):
     id: Optional[str] = None
     quote_number: Optional[str] = None
@@ -128,6 +162,7 @@ class CardIn(BaseModel):
     quotation_doc_url: Optional[str] = None
     completion_doc_name: Optional[str] = None
     completion_doc_url: Optional[str] = None
+    work_order_details: Optional[WorkOrderDetailsIn] = None
     remarks: List[RemarkIn] = []
     list_history: List[ListHistoryIn] = []
     order_confirmation_details: Optional[OrderConfirmationIn] = None
@@ -228,6 +263,88 @@ def _oc_to_dict(oc: Optional[OrderConfirmationDetails]) -> Optional[dict]:
         "managerName":                   oc.manager_name,
     }
 
+
+def _wo_to_dict(wo: Optional[WorkOrderDetails]) -> Optional[dict]:
+    if not wo:
+        return None
+    return {
+        "woDate":                       wo.wo_date.isoformat() if wo.wo_date else None,
+        "customerId":                   wo.customer_id,
+        "invoiceNo":                    wo.invoice_no,
+        "invoiceDate":                  wo.invoice_date.isoformat() if wo.invoice_date else None,
+        "brand":                        wo.brand.value if wo.brand else None,
+        "companyName":                  wo.company_name,
+        "companyContactName":           wo.company_contact_name,
+        "companyAddress":               wo.company_address,
+        "companyPhone":                 wo.company_phone,
+        "companyEmail":                 wo.company_email,
+        "deliveryDate":                 wo.delivery_date.isoformat() if wo.delivery_date else None,
+        "deliveryLocation":             wo.delivery_location,
+        "deliveryContactName":          wo.delivery_contact_name,
+        "deliveryContactNumber":        wo.delivery_contact_number,
+        "installationCompletionDate":   wo.installation_completion_date.isoformat() if wo.installation_completion_date else None,
+        "typeInsulated":                wo.type_insulated,
+        "typeNonInsulated":             wo.type_non_insulated,
+        "skidHollow":                   wo.skid_hollow,
+        "skidIBeam":                    wo.skid_i_beam,
+        "indicatorTube":                wo.indicator_tube,
+        "indicatorScale":               wo.indicator_scale,
+        "ladderInternal":               wo.ladder_internal,
+        "ladderExternal":               wo.ladder_external,
+        "supportInternal":              wo.support_internal,
+        "supportExternal":              wo.support_external,
+        "supply":                       wo.supply,
+        "installation":                 wo.installation,
+        "testingCommissioning":         wo.testing_commissioning,
+        "maintenance":                  wo.maintenance,
+        "jobDescription":               wo.job_description,
+        "items":                        wo.items or [],
+    }
+
+
+def _parse_work_order_form(wo_in: WorkOrderDetailsIn) -> dict:
+    def parse_date(value: Optional[str]):
+        if not value:
+            return None
+        try:
+            return date_type.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
+
+    return {
+        "wo_date": parse_date(wo_in.wo_date),
+        "customer_id": wo_in.customer_id,
+        "invoice_no": wo_in.invoice_no,
+        "invoice_date": parse_date(wo_in.invoice_date),
+        "brand": wo_in.brand,
+        "company_name": wo_in.company_name,
+        "company_contact_name": wo_in.company_contact_name,
+        "company_address": wo_in.company_address,
+        "company_phone": wo_in.company_phone,
+        "company_email": wo_in.company_email,
+        "delivery_date": parse_date(wo_in.delivery_date),
+        "delivery_location": wo_in.delivery_location,
+        "delivery_contact_name": wo_in.delivery_contact_name,
+        "delivery_contact_number": wo_in.delivery_contact_number,
+        "installation_completion_date": parse_date(wo_in.installation_completion_date),
+        "type_insulated": wo_in.type_insulated,
+        "type_non_insulated": wo_in.type_non_insulated,
+        "skid_hollow": wo_in.skid_hollow,
+        "skid_i_beam": wo_in.skid_i_beam,
+        "indicator_tube": wo_in.indicator_tube,
+        "indicator_scale": wo_in.indicator_scale,
+        "ladder_internal": wo_in.ladder_internal,
+        "ladder_external": wo_in.ladder_external,
+        "support_internal": wo_in.support_internal,
+        "support_external": wo_in.support_external,
+        "supply": wo_in.supply,
+        "installation": wo_in.installation,
+        "testing_commissioning": wo_in.testing_commissioning,
+        "maintenance": wo_in.maintenance,
+        "job_description": wo_in.job_description,
+        "items": wo_in.items or [],
+    }
+
 def _card_to_dict(card: Card) -> dict:
     channel_name = card.channel_rel.channel_name if card.channel_rel else None
     raw_list_name = card.list_rel.list_name if card.list_rel else None
@@ -266,6 +383,7 @@ def _card_to_dict(card: Card) -> dict:
         "completionDocUrl":     card.completion_doc_url,
         "createdAt":            card.created_at.isoformat() if card.created_at else None,
         "updatedAt":            card.updated_at.isoformat() if card.updated_at else None,
+        "workOrderDetails":     _wo_to_dict(card.work_order_details),
         "orderConfirmationDetails": _oc_to_dict(card.order_confirmation),
         "remarks": [
             {
@@ -387,6 +505,17 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
             except (ValueError, TypeError):
                 pass
         db.add(ListHistory(card_id=card.id, list_id=h_list.list_id, entered_at=h_entered_at))
+
+    # ── Work Order Details: upsert ──────────────────────────────────────────
+    wo_in = card_in.work_order_details
+    if wo_in is not None:
+        existing_wo = db.query(WorkOrderDetails).filter_by(card_id=card.id).first()
+        wo_data = _parse_work_order_form(wo_in)
+        if existing_wo:
+            for key, value in wo_data.items():
+                setattr(existing_wo, key, value)
+        else:
+            db.add(WorkOrderDetails(card_id=card.id, **wo_data))
 
     _write_audit(db, card_in.channel_name, "card_created", performed_by, card.id)
     db.commit()
@@ -615,6 +744,17 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
                 sales_executive_name=oc_in.sales_executive_name,
                 manager_name=oc_in.manager_name,
             ))
+
+    # ── Work Order Details: upsert ──────────────────────────────────────────
+    wo_in = card_in.work_order_details
+    if wo_in is not None:
+        wo_data = _parse_work_order_form(wo_in)
+        existing_wo = db.query(WorkOrderDetails).filter_by(card_id=card.id).first()
+        if existing_wo:
+            for key, value in wo_data.items():
+                setattr(existing_wo, key, value)
+        else:
+            db.add(WorkOrderDetails(card_id=card.id, **wo_data))
 
     _write_audit(db, card_in.channel_name,
                  "card_created" if is_new else "card_updated",
