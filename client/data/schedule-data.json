@@ -9,56 +9,10 @@
       "listId": "pending-installation",
       "workers": [],
       "isEmergency": false,
-      "paymentPercent": 0,
+      "paymentPercent": 50,
       "isConfirmed": false,
       "remarks": [],
       "createdAt": "2026-06-30T09:17:00.977077+00:00"
-    },
-    {
-      "id": "wo-1782559098519-50999c399ad7d8",
-      "sourceCardId": "1782559098519-50999c399ad7d8",
-      "woCode": "40",
-      "scheduleType": "Installation",
-      "listId": "pending-installation",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": false,
-      "remarks": [],
-      "createdAt": "2026-06-27T11:18:18.547507+00:00",
-      "customer": "mhvm",
-      "location": "hmghm",
-      "salesPerson": "m vhm",
-      "productType": "mvhgmvg"
-    },
-    {
-      "id": "wo-1782557350879-90fc9f2296003",
-      "sourceCardId": "1782557350879-90fc9f2296003",
-      "woCode": "9656814503",
-      "scheduleType": "Installation",
-      "listId": "pending-installation",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": false,
-      "remarks": [],
-      "createdAt": "2026-06-27T10:49:11.143775+00:00"
-    },
-    {
-      "id": "wo-1782475372257-76e28f1a6ade5",
-      "sourceCardId": "1782475372257-76e28f1a6ade5",
-      "woCode": "9999",
-      "scheduleType": "Installation",
-      "listId": "pending-installation",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": false,
-      "remarks": [],
-      "createdAt": "2026-06-26T12:02:52.289287+00:00",
-      "location": "sa",
-      "salesPerson": "as",
-      "productType": "asa"
     }
   ],
   "delivery-2026-06-27": [],
@@ -80,7 +34,87 @@
     }
   ],
   "installation-2026-06-29": [],
-  "installation-2026-07-01": [],
+  "installation-2026-07-01": [
+    {
+      "id": "wo-1782836096977",
+      "sourceCardId": "1782836096977",
+      "woCode": "3333",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-30T16:14:56.994781+00:00"
+    },
+    {
+      "id": "wo-1782475372257-76e28f1a6ade5",
+      "sourceCardId": "1782475372257-76e28f1a6ade5",
+      "woCode": "9999",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": true,
+      "remarks": [],
+      "createdAt": "2026-06-26T12:02:52.289287+00:00",
+      "location": "sa",
+      "salesPerson": "as",
+      "productType": "asa",
+      "confirmedDate": "2026-07-01"
+    },
+    {
+      "id": "wo-1782908743798-74f8627c41b9f",
+      "sourceCardId": "1782908743798-74f8627c41b9f",
+      "woCode": "5555",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 70,
+      "isConfirmed": true,
+      "remarks": [],
+      "createdAt": "2026-07-01T12:25:43.902601+00:00",
+      "customer": "sdvsd",
+      "location": "dvzxd",
+      "salesPerson": "anoop mohan ",
+      "productType": "supply and installation of panel tanks ",
+      "confirmedDate": "2026-07-01",
+      "completedDate": "2026-07-01"
+    },
+    {
+      "id": "wo-1782557350879-90fc9f2296003",
+      "sourceCardId": "1782557350879-90fc9f2296003",
+      "woCode": "9656814503",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 100,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-27T10:49:11.143775+00:00"
+    },
+    {
+      "id": "wo-1782559098519-50999c399ad7d8",
+      "sourceCardId": "1782559098519-50999c399ad7d8",
+      "woCode": "40",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 50,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-27T11:18:18.547507+00:00",
+      "customer": "mhvm",
+      "location": "hmghm",
+      "salesPerson": "m vhm",
+      "productType": "mvhgmvg"
+    }
+  ],
   "installation-2026-06-30": [
     {
       "id": "wo-1782482821720-0f96f420ba7e68",
@@ -108,5 +142,23 @@
     }
   ],
   "installation-2026-07-03": [],
-  "installation-2026-07-02": []
+  "installation-2026-07-02": [],
+  "delivery-2026-07-01": [
+    {
+      "id": "wo-1782477714842-2f7945615b65d8",
+      "sourceCardId": "1782477714842-2f7945615b65d8",
+      "woCode": "9999",
+      "scheduleType": "Delivery",
+      "listId": "delivery-2026-07-01",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 20,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-06-26T12:41:54.912383+00:00",
+      "location": "Ex wane hosiue ",
+      "salesPerson": "leyon paul",
+      "productType": "asf"
+    }
+  ]
 }

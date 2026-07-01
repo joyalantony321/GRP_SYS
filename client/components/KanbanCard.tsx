@@ -62,7 +62,10 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
 
   const isWorkOrderCard = card.channel === 'Work Order';
   const canViewPayment = isWorkOrderCard && (userRole === 'admin' || userDepartment === 'Accounts');
-  const canAdjustPayment = isWorkOrderCard && userRole === 'user' && userDepartment === 'Accounts';
+  const canAdjustPayment = isWorkOrderCard && (
+    userRole === 'admin' ||
+    (userRole === 'user' && userDepartment === 'Accounts')
+  );
   const paymentPercent = Math.max(0, Math.min(100, Number(card.paymentPercent ?? 0)));
   const paymentHue = Math.round((paymentPercent / 100) * 120); // red(0) -> green(120)
   const paymentColor = `hsl(${paymentHue} 78% 40%)`;

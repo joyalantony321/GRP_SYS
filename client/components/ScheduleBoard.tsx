@@ -79,6 +79,25 @@ const deriveProductType = (card: WorkOrderCard): string | undefined => {
   return card.subject || details.jobDescription || undefined;
 };
 
+const deriveTankSize = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  const firstItem = details.items?.find(item => item.itemDescription?.trim());
+  return firstItem?.itemDescription?.trim() || undefined;
+};
+
+const deriveContactPerson = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  return details.deliveryContactName?.trim() || details.companyContactName?.trim() || undefined;
+};
+
+const derivePhoneNumber = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  return details.deliveryContactNumber?.trim() || details.companyPhone?.trim() || undefined;
+};
+
 const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
 
 const isCardDelayedOnDate = (card: ScCard, day: string) => {
@@ -159,6 +178,9 @@ const toScheduleCard = (card: WorkOrderCard): ScCard => {
     createdAt: card.createdAt || new Date().toISOString(),
     customer: card.customerName || card.customerCompanyName || undefined,
     location: card.projectLocation || undefined,
+    tankSize: deriveTankSize(card),
+    contactPerson: deriveContactPerson(card),
+    phone: derivePhoneNumber(card),
     salesPerson: card.salesPerson || undefined,
     brand: normalizeBrand(details?.brand),
     productType: deriveProductType(card),
@@ -187,6 +209,9 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
       existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : existing.paymentPercent;
       existing.customer = wo.customerName || wo.customerCompanyName || existing.customer;
       existing.location = wo.projectLocation || existing.location;
+      existing.tankSize = deriveTankSize(wo) || existing.tankSize;
+      existing.contactPerson = deriveContactPerson(wo) || existing.contactPerson;
+      existing.phone = derivePhoneNumber(wo) || existing.phone;
       existing.salesPerson = wo.salesPerson || existing.salesPerson;
       existing.brand = normalizeBrand(wo.workOrderDetails?.brand) || existing.brand;
       existing.productType = deriveProductType(wo) || existing.productType;
