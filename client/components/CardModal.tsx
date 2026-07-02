@@ -77,7 +77,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     setDocUploading(p => ({ ...p, po: true }));
     try {
       const { fileName, url } = await uploadDocument(card.id, 'po', file, _performedBy());
-      const updated: Card = { ...card, purchaseOrderDocName: fileName, purchaseOrderDocUrl: url, purchaseOrderDocData: undefined, updatedAt: new Date().toISOString() };
+      const updated: Card = { ...editedCard, purchaseOrderDocName: fileName, purchaseOrderDocUrl: url, purchaseOrderDocData: undefined, updatedAt: new Date().toISOString() };
       onUpdate(updated);
       setEditedCard(updated);
     } catch (err) {
@@ -92,7 +92,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     setDocUploading(p => ({ ...p, qtn: true }));
     try {
       const { fileName, url } = await uploadDocument(card.id, 'qtn', file, _performedBy());
-      const updated: Card = { ...card, quotationDocName: fileName, quotationDocUrl: url, quotationDocData: undefined, updatedAt: new Date().toISOString() };
+      const updated: Card = { ...editedCard, quotationDocName: fileName, quotationDocUrl: url, quotationDocData: undefined, updatedAt: new Date().toISOString() };
       onUpdate(updated);
       setEditedCard(updated);
     } catch (err) {
@@ -113,7 +113,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
         : docType === 'qtn'
         ? { quotationDocName: undefined, quotationDocUrl: undefined, quotationDocData: undefined }
         : { completionDocName: undefined, completionDocUrl: undefined, completionDocData: undefined };
-    const updated: Card = { ...card, ...cleared, updatedAt: new Date().toISOString() };
+    const updated: Card = { ...editedCard, ...cleared, updatedAt: new Date().toISOString() };
     onUpdate(updated);
     setEditedCard(updated);
   };
@@ -661,7 +661,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                       <div className="col-span-1 md:col-span-2">
                         <div className="flex items-center gap-2 mb-2">
                           <label className="block text-sm font-medium text-gray-700">Completion Document</label>
-                          {card.completedAt
+                          {editedCard.completedAt
                             ? <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">✓ Completed</span>
                             : <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Required for completion</span>}
                         </div>
@@ -695,7 +695,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         ) : (
                           <p className="text-sm text-gray-400 italic px-1">No Completion document attached.</p>
                         )}
-                        {!docUploading.completion && isEditing && !card.completedAt && (
+                        {!docUploading.completion && isEditing && !editedCard.completedAt && (
                           <input
                             type="file"
                             accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
@@ -706,7 +706,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                               setDocUploading(p => ({ ...p, completion: true }));
                               try {
                                 const { fileName, url } = await uploadDocument(card.id, 'completion', file, _performedBy());
-                                const updated: Card = { ...card, completionDocName: fileName, completionDocUrl: url, completionDocData: undefined, updatedAt: new Date().toISOString() };
+                                const updated: Card = { ...editedCard, completionDocName: fileName, completionDocUrl: url, completionDocData: undefined, updatedAt: new Date().toISOString() };
                                 onUpdate(updated);
                                 setEditedCard(updated);
                               } catch (err) {
@@ -728,9 +728,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                 <div className="px-4 py-3 bg-white">
                   <div className={`grid gap-2 ${!isDeliveryInstallation ? 'grid-cols-2' : 'grid-cols-1'}`}>
                     {/* WO Details tile */}
-                    <div className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${card.workOrderDetails ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <div className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${editedCard.workOrderDetails ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                       <div className="text-xs">
-                        {card.workOrderDetails
+                        {editedCard.workOrderDetails
                           ? <span className="flex items-center gap-1 text-green-600 font-semibold"><Check className="w-3 h-3" /> Filled</span>
                           : <span className="text-gray-400">Not filled</span>}
                       </div>
@@ -744,9 +744,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                     </div>
                     {/* Order Confirmation tile — hidden for D&I */}
                     {!isDeliveryInstallation && (
-                      <div className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${card.orderConfirmationDetails ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+                      <div className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border ${editedCard.orderConfirmationDetails ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
                         <div className="text-xs">
-                          {card.orderConfirmationDetails
+                          {editedCard.orderConfirmationDetails
                             ? <span className="flex items-center gap-1 text-blue-600 font-semibold"><Check className="w-3 h-3" /> Confirmed</span>
                             : <span className="text-gray-400">Not confirmed</span>}
                         </div>
@@ -1048,10 +1048,10 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
       {showWOForm && (
         <WorkOrderFormModal
-          workOrderNumber={card.workOrderNumber || '0000'}
-          companyCode={card.companyCode || 'GRP'}
-          salesPerson={card.salesPerson}
-          quoteNumber={card.quoteNumber}
+          workOrderNumber={editedCard.workOrderNumber || '0000'}
+          companyCode={editedCard.companyCode || 'GRP'}
+          salesPerson={editedCard.salesPerson}
+          quoteNumber={editedCard.quoteNumber}
           existing={workOrderForm}
           canEdit={userRole === 'admin'}
           onSave={(data) => {
@@ -1067,11 +1067,13 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
       {showOCForm && (
         <OrderConfirmationModal
-          workOrder={`${card.companyCode || 'GRP'}/${card.workOrderNumber || '0000'}`}
-          existing={card.orderConfirmationDetails}
+          workOrder={`${editedCard.companyCode || 'GRP'}/${editedCard.workOrderNumber || '0000'}`}
+          existing={editedCard.orderConfirmationDetails}
           canEdit={userRole === 'admin'}
           onSave={(data) => {
-            onUpdate({ ...card, orderConfirmationDetails: data, updatedAt: new Date().toISOString() });
+            const updated: Card = { ...editedCard, orderConfirmationDetails: data, updatedAt: new Date().toISOString() };
+            onUpdate(updated);
+            setEditedCard(updated);
             setShowOCForm(false);
           }}
           onClose={() => setShowOCForm(false)}

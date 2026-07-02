@@ -18,7 +18,7 @@ from models import (
     Card, Channel, List as ListModel, Remark, ListHistory,
     WorkOrderDetails, OrderConfirmationDetails,
     AuditLogQuotation, AuditLogWorkOrder,
-    User, WorkingStatus, StageType,
+    User, WorkingStatus, StageType, BrandType,
 )
 from ws_manager import manager
 
@@ -311,12 +311,22 @@ def _parse_work_order_form(wo_in: WorkOrderDetailsIn) -> dict:
         except (ValueError, TypeError):
             return None
 
+    def parse_brand(value: Optional[str]) -> Optional[BrandType]:
+        if not value:
+            return None
+        normalized = value.strip().upper()
+        if normalized in {"PIPECO", "PIPECO TANKS"}:
+            return BrandType.PIPECO
+        if normalized in {"COLEX", "COLEX TANKS"}:
+            return BrandType.COLEX
+        return None
+
     return {
         "wo_date": parse_date(wo_in.wo_date),
         "customer_id": wo_in.customer_id,
         "invoice_no": wo_in.invoice_no,
         "invoice_date": parse_date(wo_in.invoice_date),
-        "brand": wo_in.brand,
+        "brand": parse_brand(wo_in.brand),
         "company_name": wo_in.company_name,
         "company_contact_name": wo_in.company_contact_name,
         "company_address": wo_in.company_address,
