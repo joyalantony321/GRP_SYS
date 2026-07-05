@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { X, Save, ClipboardCheck } from 'lucide-react';
+import { X, Save, ClipboardCheck, FileDown } from 'lucide-react';
 import { OrderConfirmationFormData, defaultOrderConfirmationForm } from '@/types';
+import { exportOrderConfirmationPdf } from '@/lib/fillOrderConfirmationPdf';
 
 interface Props {
   workOrder: string;
+  companyCode?: string;
   existing?: OrderConfirmationFormData;
   canEdit: boolean;
   onSave: (data: OrderConfirmationFormData) => void;
@@ -75,8 +77,20 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
 
 /* ─── Main Component ─── */
 
-export default function OrderConfirmationModal({ workOrder, existing, canEdit, onSave, onClose }: Props) {
+export default function OrderConfirmationModal({ workOrder, companyCode = 'GRP', existing, canEdit, onSave, onClose }: Props) {
   const [form, setForm] = useState<OrderConfirmationFormData>(existing ?? defaultOrderConfirmationForm());
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportOrderConfirmationPdf(workOrder, companyCode, form);
+    } catch (err) {
+      alert(`Export failed: ${(err as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const set = <K extends keyof OrderConfirmationFormData>(key: K, value: OrderConfirmationFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -299,6 +313,14 @@ export default function OrderConfirmationModal({ workOrder, existing, canEdit, o
         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
             {canEdit ? 'Cancel' : 'Close'}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-5 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+          >
+            <FileDown className="w-4 h-4" />
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
           {canEdit && (
             <button onClick={() => onSave(form)} className="flex items-center gap-2 px-5 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
