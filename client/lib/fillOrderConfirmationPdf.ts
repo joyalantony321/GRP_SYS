@@ -229,7 +229,7 @@ export async function exportOrderConfirmationPdf(
   drawText(page, font, oc?.whenRecollect ?? '', 140, 444, { size: 8, maxWidth: 245 });
 
   // WORK IN PROGRESS % (x=142, y=426, w=236, h=12)
-  const wipDisplay = oc?.workInProgressPercent ? `${oc.workInProgressPercent} %` : '';
+  const wipDisplay = oc?.workInProgressPercent ? `${oc.workInProgressPercent} ` : '';
   drawText(page, font, wipDisplay, 142, 426, { size: 8, maxWidth: 236 });
 
   // ── Completion (x=177,y=408,w=93,h=12)  CDC (x=344,y=407,w=9,h=8)  PDC (x=476,y=407,w=8,h=8)
