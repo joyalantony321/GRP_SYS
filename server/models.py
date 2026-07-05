@@ -190,7 +190,14 @@ class WorkOrderDetails(Base):
     customer_id                  = Column(String(100), nullable=True)
     invoice_no                   = Column(String(100), nullable=True)
     invoice_date                 = Column(Date, nullable=True)
-    brand                        = Column(Enum(BrandType), nullable=True)
+    brand                        = Column(
+        Enum(
+            BrandType,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+            name="brand_type",
+        ),
+        nullable=True,
+    )
     company_name                 = Column(String(255), nullable=True)
     company_contact_name         = Column(String(255), nullable=True)
     company_address              = Column(Text, nullable=True)

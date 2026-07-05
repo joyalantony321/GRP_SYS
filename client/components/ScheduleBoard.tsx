@@ -79,6 +79,25 @@ const deriveProductType = (card: WorkOrderCard): string | undefined => {
   return card.subject || details.jobDescription || undefined;
 };
 
+const deriveTankSize = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  const firstItem = details.items?.find(item => item.itemDescription?.trim());
+  return firstItem?.itemDescription?.trim() || undefined;
+};
+
+const deriveContactPerson = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  return details.deliveryContactName?.trim() || details.companyContactName?.trim() || undefined;
+};
+
+const derivePhoneNumber = (card: WorkOrderCard): string | undefined => {
+  const details = card.workOrderDetails;
+  if (!details) return undefined;
+  return details.deliveryContactNumber?.trim() || details.companyPhone?.trim() || undefined;
+};
+
 const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
 
 const isCardDelayedOnDate = (card: ScCard, day: string) => {
@@ -159,6 +178,9 @@ const toScheduleCard = (card: WorkOrderCard): ScCard => {
     createdAt: card.createdAt || new Date().toISOString(),
     customer: card.customerName || card.customerCompanyName || undefined,
     location: card.projectLocation || undefined,
+    tankSize: deriveTankSize(card),
+    contactPerson: deriveContactPerson(card),
+    phone: derivePhoneNumber(card),
     salesPerson: card.salesPerson || undefined,
     brand: normalizeBrand(details?.brand),
     productType: deriveProductType(card),
@@ -183,13 +205,18 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
     const inferredType = inferScheduleTypeFromWorkOrder(wo);
     const targetPending = inferredType === 'Installation' ? 'pending-installation' : 'pending-delivery';
     if (existing) {
-      // Keep current schedule placement, but refresh mirrored core fields
-      existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : existing.paymentPercent;
-      existing.customer = wo.customerName || wo.customerCompanyName || existing.customer;
-      existing.location = wo.projectLocation || existing.location;
-      existing.salesPerson = wo.salesPerson || existing.salesPerson;
-      existing.brand = normalizeBrand(wo.workOrderDetails?.brand) || existing.brand;
-      existing.productType = deriveProductType(wo) || existing.productType;
+      // Keep current schedule placement, but always mirror latest WO fields.
+      // Use direct assignment (not OR-fallback) so Schedule stays an exact
+      // reflection of Work Order values, including clear/reset updates.
+      existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : 0;
+      existing.customer = wo.customerName || wo.customerCompanyName || undefined;
+      existing.location = wo.projectLocation || undefined;
+      existing.tankSize = deriveTankSize(wo);
+      existing.contactPerson = deriveContactPerson(wo);
+      existing.phone = derivePhoneNumber(wo);
+      existing.salesPerson = wo.salesPerson || undefined;
+      existing.brand = normalizeBrand(wo.workOrderDetails?.brand);
+      existing.productType = deriveProductType(wo);
       if (explicitSchedule) {
         // Work Order has explicit type — enforce it
         existing.scheduleType = inferredType;
@@ -454,6 +481,10 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
   useEffect(() => {
     setTargetListId(listId);
   }, [listId, card.id]);
+
+  useEffect(() => {
+    setEc({ ...card, remarks: [...card.remarks] });
+  }, [card]);
 
   // Stage pill colour
   const stagePillCls = stageText.toLowerCase().includes('complet') ? 'bg-green-100 text-green-700 border-green-200'

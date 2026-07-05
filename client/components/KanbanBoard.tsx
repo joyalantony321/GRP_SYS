@@ -167,13 +167,25 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     return channelLists.filter(l => merged.includes(l));
   }, [activeChannel, userRole, userDepartment, userName, cards]);
 
+  const getCardActivityTime = (card: CardType) =>
+    Date.parse(card.updatedAt || card.createdAt || '') || 0;
+
+  const sortCardsByLatestActivity = (inputCards: CardType[]) => {
+    const cardCode = (card: CardType) => card.workOrderNumber || card.quoteNumber || card.id;
+    return [...inputCards].sort((left, right) => {
+      const timeDiff = getCardActivityTime(right) - getCardActivityTime(left);
+      if (timeDiff !== 0) return timeDiff;
+      return cardCode(right).localeCompare(cardCode(left));
+    });
+  };
+
   const renderKanbanList = (list: ListType, className?: string) => (
     <KanbanList
       key={list}
       list={list}
       cards={list === 'Schedule'
         ? sortScheduleCards(filteredCards.filter(card => normalizeListType(card.list) === list))
-        : filteredCards.filter(card => normalizeListType(card.list) === list)}
+        : sortCardsByLatestActivity(filteredCards.filter(card => normalizeListType(card.list) === list))}
       onCardClick={openExistingCard}
       onDeleteCard={handleDeleteCard}
       onApproveCard={handleApproveCard}
@@ -192,24 +204,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   );
 
   const sortScheduleCards = (inputCards: CardType[]) => {
-    const currentScheduleEntry = (card: CardType) => {
-      const history = card.listHistory ?? [];
-      const entry = [...history].reverse().find(item => normalizeListType(item.list) === 'Schedule');
-      return Date.parse(entry?.enteredAt ?? card.updatedAt ?? card.createdAt ?? '') || 0;
-    };
-
-    const emergencyFlag = (card: CardType) => (card as CardType & { isEmergency?: boolean }).isEmergency === true;
-    const cardCode = (card: CardType) => card.workOrderNumber || card.quoteNumber || card.id;
-
-    return [...inputCards].sort((left, right) => {
-      const leftType = left.scheduleType ?? 'Delivery';
-      const rightType = right.scheduleType ?? 'Delivery';
-      if (leftType !== rightType) return leftType === 'Delivery' ? -1 : 1;
-      if (emergencyFlag(left) !== emergencyFlag(right)) return emergencyFlag(left) ? -1 : 1;
-      const timeDiff = currentScheduleEntry(left) - currentScheduleEntry(right);
-      if (timeDiff !== 0) return timeDiff;
-      return cardCode(left).localeCompare(cardCode(right));
-    });
+    return sortCardsByLatestActivity(inputCards);
   };
 
   // Reset remark filter when switching channels (they have different filter options)
@@ -335,6 +330,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     // that have never been forwarded to anyone else.
     if (userRole === 'user') {
       filtered = filtered.filter(card => {
+        // Work Order -> Schedule list is visible to all department users.
+        if (activeChannel === 'Work Order' && normalizeListType(card.list) === 'Schedule') {
+          return true;
+        }
         if (card.assignedTo === userName) return true;
         // Only show an unassigned card to the user if it was self-created AND
         // has never been assigned to a different person.
@@ -428,15 +427,24 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
         return false;
       });
     }
-    return approved.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return approved.sort((a, b) => {
+      const aMs = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+      const bMs = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+      return bMs - aMs;
+    });
   }, [activeChannel, cards, dateFilter, dayDate, weekEndDate, weekRangeDays, monthFilterYear, monthFilterMonth, userRole, userName]);
 
   const handleUpdateCard = (updatedCard: CardType) => {
+    const now = new Date().toISOString();
+    const normalizedCard: CardType = {
+      ...updatedCard,
+      updatedAt: updatedCard.updatedAt || now,
+    };
     const updatedCards = cards.map(card =>
-      card.id === updatedCard.id ? updatedCard : card
+      card.id === normalizedCard.id ? normalizedCard : card
     );
     setCards(updatedCards);
-    setSelectedCard(updatedCard);
+    setSelectedCard(normalizedCard);
   };
 
   const handleDeleteCard = (cardId: string) => {
@@ -747,8 +755,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   };
 
   const handleUpdateWorkStatus = (cardId: string, status: UserWorkStatus) => {
+    const now = new Date().toISOString();
     const updatedCards = cards.map(card =>
-      card.id === cardId ? { ...card, userWorkStatus: status } : card
+      card.id === cardId ? { ...card, userWorkStatus: status, updatedAt: now } : card
     );
     setCards(updatedCards);
   };
