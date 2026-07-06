@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from database import engine, Base
 from reporting.daily_excel_reports import start_daily_report_task
 from ws_manager import manager
-from routes import cards, users, files, audit, work_order_export
+from routes import cards, users, files, audit, reports, work_order_export
 
 load_dotenv()
 
@@ -92,6 +92,7 @@ app.include_router(cards.router)
 app.include_router(users.router)
 app.include_router(files.router)
 app.include_router(audit.router)
+app.include_router(reports.router)
 app.include_router(work_order_export.router)
 
 

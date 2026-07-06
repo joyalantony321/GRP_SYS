@@ -40,6 +40,7 @@ services:
       REPORT_RUN_TIME: ${REPORT_RUN_TIME:-00:05}
       REPORT_TEMPLATES_DIR: /app/report_templates
       REPORT_OUTPUT_DIR: /app/reports/daily
+      REPORT_SCHEDULE_DATA_FILE: /app/client_data/schedule-data.json
       # Prevent threading issues in Docker
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
@@ -51,6 +52,9 @@ services:
       - "8001:8000"          # 8001 on host to avoid clash with existing backend on 8000
     volumes:
       - grp_sys_uploads:/app/uploads
+      - ./report_templates:/app/report_templates:ro
+      - ./reports/daily:/app/reports/daily
+      - ./client/data:/app/client_data
       - ./client/Public/Work order:/app/templates/work_order:ro
 
   # ── Next.js Frontend ──────────────────────────────────────────────────────

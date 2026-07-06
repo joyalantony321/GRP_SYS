@@ -45,6 +45,7 @@ HEADER_ALIASES: Dict[str, List[str]] = {
 
 @dataclass
 class ReportRecord:
+    source_card_id: str
     work_order_no: str
     quotation_no: str
     customer: str
@@ -76,6 +77,7 @@ class ReportRecord:
 class ScheduleOverlay:
     source_card_id: str
     workers: str
+    brand: str
     delivery_status: str
     installation_status: str
 
@@ -330,6 +332,7 @@ def _to_record(card: Card) -> ReportRecord:
         installation_status = stage_text or status_fallback
 
     return ReportRecord(
+        source_card_id=str(card.id),
         work_order_no=(card.work_order_number or "").strip(),
         quotation_no=(card.quote_number or "").strip(),
         customer=(card.customer_company_name or (wo.company_name if wo else "") or card.customer_name or "").strip(),
@@ -428,23 +431,18 @@ def _load_schedule_overlays() -> Dict[str, ScheduleOverlay]:
             overlays[src_id] = ScheduleOverlay(
                 source_card_id=src_id,
                 workers=workers,
+                brand=str(row.get("brand") or "").strip(),
                 delivery_status=str(row.get("deliveryStatus") or "").strip(),
                 installation_status=str(row.get("installationStatus") or "").strip(),
             )
     return overlays
 
 
-def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, ScheduleOverlay], cards: List[Card]) -> List[ReportRecord]:
-    card_by_work_order = {str(c.work_order_number or "").strip(): c for c in cards}
+def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, ScheduleOverlay]) -> List[ReportRecord]:
     updated: List[ReportRecord] = []
 
     for rec in records:
-        card = card_by_work_order.get(rec.work_order_no)
-        if not card:
-            updated.append(rec)
-            continue
-
-        ov = overlays.get(str(card.id))
+        ov = overlays.get(rec.source_card_id)
         if not ov:
             updated.append(rec)
             continue
@@ -452,6 +450,8 @@ def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, Sc
         next_rec = ReportRecord(**{**rec.__dict__})
         if ov.workers:
             next_rec.workers = ov.workers
+        if ov.brand:
+            next_rec.brand = ov.brand
         if ov.delivery_status:
             next_rec.delivery_status = ov.delivery_status
         if ov.installation_status:
@@ -640,7 +640,7 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
 
     cards = _query_work_order_cards(db)
     records = [_to_record(card) for card in cards]
-    records = _apply_schedule_overlays(records, _load_schedule_overlays(), cards)
+    records = _apply_schedule_overlays(records, _load_schedule_overlays())
 
     outputs: Dict[str, str] = {}
     missing_templates: List[str] = []
