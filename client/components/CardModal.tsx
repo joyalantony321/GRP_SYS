@@ -1067,8 +1067,8 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
 
       {showOCForm && (
         <OrderConfirmationModal
-          workOrder={`${editedCard.companyCode || 'GRP'}/${editedCard.workOrderNumber || '0000'}`}
-          existing={editedCard.orderConfirmationDetails}
+          workOrder={`${card.companyCode || 'GRP'}/${card.workOrderNumber || '0000'}`}
+          existing={card.orderConfirmationDetails}
           canEdit={userRole === 'admin'}
           onSave={(data) => {
             const updated: Card = { ...editedCard, orderConfirmationDetails: data, updatedAt: new Date().toISOString() };

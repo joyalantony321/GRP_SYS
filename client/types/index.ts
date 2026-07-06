@@ -151,7 +151,7 @@ export interface WorkOrderFormData {
   customerId?: string;
   invoiceNo?: string;
   invoiceDate?: string;
-  brand: 'PIPECO TANKS' | 'COLEX TANKS';
+  brand: 'PIPECO(Malaysia)' | 'COLEX(Korea)';
   // Company Details
   companyName: string;
   companyContactName: string;
@@ -189,7 +189,7 @@ export const defaultWorkOrderForm = (woNumber: string, salesPerson: string): Wor
   customerId: '',
   invoiceNo: '',
   invoiceDate: '',
-  brand: 'PIPECO TANKS',
+  brand: 'PIPECO(Malaysia)',
   companyName: '',
   companyContactName: '',
   companyAddress: '',
