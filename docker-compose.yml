@@ -40,10 +40,13 @@ services:
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       PYTHONHASHSEED: "0"
+      WO_TEMPLATE_PATH: /app/templates/work_order/Work order template.xlsx
+      WO_TEMPLATE_DIR: /app/templates/work_order
     ports:
       - "8001:8000"          # 8001 on host to avoid clash with existing backend on 8000
     volumes:
       - grp_sys_uploads:/app/uploads
+      - ./client/Public/Work order:/app/templates/work_order:ro
 
   # ── Next.js Frontend ──────────────────────────────────────────────────────
   frontend:

@@ -7,6 +7,13 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_COLOR=1 \
     PIP_ROOT_USER_ACTION=ignore
 
+# Install LibreOffice Calc (for xlsx → PDF conversion) + Liberation fonts
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libreoffice-calc \
+        fonts-liberation \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .

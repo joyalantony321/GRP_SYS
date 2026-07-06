@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { X, Plus, Trash2, Save } from 'lucide-react';
+import { X, Plus, Trash2, Save, FileDown } from 'lucide-react';
 import { WorkOrderFormData, WorkOrderItem, defaultWorkOrderForm } from '@/types';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 interface Props {
   workOrderNumber: string;
@@ -76,6 +78,33 @@ export default function WorkOrderFormModal({
   const [form, setForm] = useState<WorkOrderFormData>(
     existing ?? defaultWorkOrderForm(workOrderNumber, salesPerson)
   );
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const body = { workOrderNumber, companyCode, salesPerson, ...form };
+      const resp = await fetch(`${API_BASE}/work-order/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${workOrderNumber.split('/').pop() || workOrderNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      alert(`Export failed: ${(err as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     setForm(existing ?? defaultWorkOrderForm(workOrderNumber, salesPerson));
@@ -178,7 +207,7 @@ export default function WorkOrderFormModal({
           <div>
             <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Brand</p>
             <div className="flex gap-4">
-              {(['PIPECO TANKS', 'COLEX TANKS'] as const).map((b) => (
+              {(['PIPECO(Malaysia)', 'COLEX(Korea)'] as const).map((b) => (
                 <label key={b} className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium ${
                   form.brand === b ? 'border-purple-500 bg-purple-50 text-purple-800' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                 } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}>
@@ -365,6 +394,14 @@ export default function WorkOrderFormModal({
         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
             {canEdit ? 'Cancel' : 'Close'}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-5 py-2 text-sm font-medium bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+          >
+            <FileDown className="w-4 h-4" />
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
           {canEdit && (
             <button

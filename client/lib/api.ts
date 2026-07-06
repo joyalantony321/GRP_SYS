@@ -187,7 +187,12 @@ export function mapCard(c: Record<string, unknown>): Card {
         customerId:                 (wo.customerId as string) ?? '',
         invoiceNo:                  (wo.invoiceNo as string) ?? '',
         invoiceDate:                (wo.invoiceDate as string) ?? '',
-        brand:                      (wo.brand as 'PIPECO TANKS' | 'COLEX TANKS') ?? 'PIPECO TANKS',
+        brand: (() => {
+          const raw = wo.brand as string;
+          if (raw === 'PIPECO TANKS') return 'PIPECO(Malaysia)' as const;
+          if (raw === 'COLEX TANKS')  return 'COLEX(Korea)'     as const;
+          return (raw as 'PIPECO(Malaysia)' | 'COLEX(Korea)') ?? 'PIPECO(Malaysia)';
+        })(),
         companyName:                (wo.companyName as string) ?? '',
         companyContactName:         (wo.companyContactName as string) ?? '',
         companyAddress:             (wo.companyAddress as string) ?? '',
