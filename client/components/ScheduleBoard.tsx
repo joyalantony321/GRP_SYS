@@ -44,6 +44,7 @@ export interface ScCard {
   brand?: string; productType?: string;
   customer?: string; location?: string; tankSize?: string;
   contactPerson?: string; phone?: string; salesPerson?: string;
+  deliveryStatus?: string;
   installationStatus?: string;
   completedDate?: string;
   delayPeriods?: ScDelayPeriod[];
@@ -287,6 +288,8 @@ function CardChip({
   const meta = [card.customer, card.location].filter(Boolean).join(' · ');
   const statusText = (listId.startsWith('installation-') || listId === 'pending-installation')
     ? card.installationStatus
+    : (listId.startsWith('delivery-') || listId === 'pending-delivery')
+      ? card.deliveryStatus
     : undefined;
   const compact = !isPending;
   return (
@@ -328,11 +331,12 @@ function AddCardModal({ type, onClose, onAdd }: { type: 'delivery'|'installation
   const [contact, setContact] = useState(''); const [phone, setPhone] = useState('');
   const [sales, setSales] = useState(''); const [emergency, setEmergency] = useState(false);
   const [installationStatus, setInstallationStatus] = useState('');
+  const [deliveryStatus, setDeliveryStatus] = useState('');
   const [err, setErr] = useState('');
   const submit = () => {
     if (!wo.trim()) { setErr('WO Number is required'); return; }
     if (!/^\d{4}$/.test(wo)) { setErr('Must be exactly 4 digits'); return; }
-    onAdd({ id:`${type[0]}${Date.now()}`, woCode:wo, listId:`pending-${type}`, workers:[], isEmergency:emergency, paymentPercent:0, isConfirmed:false, remarks:[], createdAt:new Date().toISOString(), customer:customer||undefined, brand:brand||undefined, productType:productType||undefined, location:location||undefined, tankSize:tankSize||undefined, contactPerson:contact||undefined, phone:phone||undefined, salesPerson:sales||undefined, installationStatus:type==='installation' ? (installationStatus.trim() || undefined) : undefined });
+    onAdd({ id:`${type[0]}${Date.now()}`, woCode:wo, listId:`pending-${type}`, workers:[], isEmergency:emergency, paymentPercent:0, isConfirmed:false, remarks:[], createdAt:new Date().toISOString(), customer:customer||undefined, brand:brand||undefined, productType:productType||undefined, location:location||undefined, tankSize:tankSize||undefined, contactPerson:contact||undefined, phone:phone||undefined, salesPerson:sales||undefined, deliveryStatus:type==='delivery' ? (deliveryStatus.trim() || undefined) : undefined, installationStatus:type==='installation' ? (installationStatus.trim() || undefined) : undefined });
     onClose();
   };
   return (
@@ -377,6 +381,11 @@ function AddCardModal({ type, onClose, onAdd }: { type: 'delivery'|'installation
           </div>
           <div><label className="block text-sm font-medium text-gray-700 mb-1">Sales Person</label>
             <input value={sales} onChange={e=>setSales(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"/></div>
+          {type==='delivery' && (
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Delivery Current Status</label>
+              <input value={deliveryStatus} onChange={e=>setDeliveryStatus(e.target.value)} placeholder="Write current delivery status"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"/></div>
+          )}
           {type==='installation' && (
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Installation Current Status</label>
               <input value={installationStatus} onChange={e=>setInstallationStatus(e.target.value)} placeholder="Write current installation status"
@@ -597,6 +606,19 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               )}
             </div>
           </div>
+
+          {/* Installation status + delay (installation cards only) */}
+          {(isDel || listId === 'pending-delivery') && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <label className="block text-xs font-semibold text-amber-700 mb-1.5">Delivery Status</label>
+              <input
+                value={ec.deliveryStatus || ''}
+                onChange={e => setEc(p => ({ ...p, deliveryStatus: e.target.value || undefined }))}
+                placeholder="Current delivery status"
+                className="w-full px-2.5 py-1.5 border border-amber-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+              />
+            </div>
+          )}
 
           {/* Installation status + delay (installation cards only) */}
           {isInstallationCard && (

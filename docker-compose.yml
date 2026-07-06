@@ -35,6 +35,11 @@ services:
       API_PORT: 8000
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
       UPLOADS_PATH: /app/uploads
+      DAILY_REPORTS_ENABLED: ${DAILY_REPORTS_ENABLED:-1}
+      REPORT_GENERATE_ON_STARTUP: ${REPORT_GENERATE_ON_STARTUP:-1}
+      REPORT_RUN_TIME: ${REPORT_RUN_TIME:-00:05}
+      REPORT_TEMPLATES_DIR: /app/report_templates
+      REPORT_OUTPUT_DIR: /app/reports/daily
       # Prevent threading issues in Docker
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
@@ -44,6 +49,9 @@ services:
       - "8001:8000"          # 8001 on host to avoid clash with existing backend on 8000
     volumes:
       - grp_sys_uploads:/app/uploads
+      - ./report_templates:/app/report_templates:ro
+      - ./reports/daily:/app/reports/daily
+      - ./client/data:/app/client_data
 
   # ── Next.js Frontend ──────────────────────────────────────────────────────
   frontend:

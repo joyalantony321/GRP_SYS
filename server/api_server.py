@@ -15,8 +15,9 @@ from sqlalchemy import text
 from dotenv import load_dotenv
 
 from database import engine, Base
+from reporting.daily_excel_reports import start_daily_report_task
 from ws_manager import manager
-from routes import cards, users, files, audit
+from routes import cards, users, files, audit, reports
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ CORS_ORIGINS = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    report_task = None
     # Create all tables (safe to run multiple times)
     Base.metadata.create_all(bind=engine)
     # Add columns introduced after initial schema (idempotent).
@@ -55,7 +57,16 @@ async def lifespan(app: FastAPI):
                 conn.execute(text(sql))
         except Exception as exc:
             print(f"[startup-migration] skipped (already applied or error): {exc}")
-    yield
+    try:
+        report_task = start_daily_report_task()
+    except Exception as exc:
+        print(f"[daily-reports] scheduler startup failed: {exc}")
+
+    try:
+        yield
+    finally:
+        if report_task:
+            report_task.cancel()
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -81,6 +92,7 @@ app.include_router(cards.router)
 app.include_router(users.router)
 app.include_router(files.router)
 app.include_router(audit.router)
+app.include_router(reports.router)
 
 
 # ── WebSocket ────────────────────────────────────────────────────────────────

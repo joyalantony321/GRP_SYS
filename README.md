@@ -108,3 +108,53 @@ This removes DB volume and re-runs schema + seed from scratch.
 
 - For normal usage, team members do not need to run `Database/setup_db.bat`.
 - `setup_db.bat` is still available as a Windows helper, but Docker Compose is now the primary flow.
+
+## Daily Excel Reports
+
+The backend can auto-generate 7 daily Excel reports from live database data using company template files.
+
+Expected template folder inside backend container:
+
+- `/app/report_templates`
+
+Host-mapped template folder in this repo:
+
+- `report_templates/`
+
+Template file names expected:
+
+- `Delivery Planning.xlsx`
+- `Delivery Pending.xlsx`
+- `Delivery Status.xlsx`
+- `Installation Planning.xlsx`
+- `Installation Pending.xlsx`
+- `Installation Status.xlsx`
+- `Payment Status.xlsx`
+
+Output folder:
+
+- `/app/reports/daily`
+
+Host-mapped output folder in this repo:
+
+- `reports/daily/`
+
+Reports API trigger:
+
+```powershell
+curl -X POST "http://localhost:8001/reports/daily/generate"
+```
+
+Optional date:
+
+```powershell
+curl -X POST "http://localhost:8001/reports/daily/generate?for_date=2026-07-02"
+```
+
+Environment variables (backend):
+
+- `DAILY_REPORTS_ENABLED=1` to run automatic scheduler
+- `REPORT_GENERATE_ON_STARTUP=1` to generate once on backend startup
+- `REPORT_RUN_TIME=00:05` for daily generation time (server local time)
+- `REPORT_TEMPLATES_DIR=/app/report_templates`
+- `REPORT_OUTPUT_DIR=/app/reports/daily`
