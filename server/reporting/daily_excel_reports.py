@@ -45,7 +45,6 @@ HEADER_ALIASES: Dict[str, List[str]] = {
 
 @dataclass
 class ReportRecord:
-    source_card_id: str
     work_order_no: str
     quotation_no: str
     customer: str
@@ -231,6 +230,18 @@ def _pdc_cheque_percent(card: Card) -> str:
     return f"{round(total, 2)}%"
 
 
+def _normalize_overlay_brand(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    upper = raw.upper()
+    if "COLEX" in upper:
+        return "COLEX TANKS"
+    if "PIPECO" in upper or "PIPPECO" in upper:
+        return "PIPECO TANKS"
+    return raw
+
+
 def _payment_completed_on(rec: ReportRecord) -> Optional[date]:
     if rec.payment_percent < 100:
         return None
@@ -332,7 +343,6 @@ def _to_record(card: Card) -> ReportRecord:
         installation_status = stage_text or status_fallback
 
     return ReportRecord(
-        source_card_id=str(card.id),
         work_order_no=(card.work_order_number or "").strip(),
         quotation_no=(card.quote_number or "").strip(),
         customer=(card.customer_company_name or (wo.company_name if wo else "") or card.customer_name or "").strip(),
@@ -431,18 +441,24 @@ def _load_schedule_overlays() -> Dict[str, ScheduleOverlay]:
             overlays[src_id] = ScheduleOverlay(
                 source_card_id=src_id,
                 workers=workers,
-                brand=str(row.get("brand") or "").strip(),
+                brand=_normalize_overlay_brand(str(row.get("brand") or "")),
                 delivery_status=str(row.get("deliveryStatus") or "").strip(),
                 installation_status=str(row.get("installationStatus") or "").strip(),
             )
     return overlays
 
 
-def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, ScheduleOverlay]) -> List[ReportRecord]:
+def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, ScheduleOverlay], cards: List[Card]) -> List[ReportRecord]:
+    card_by_work_order = {str(c.work_order_number or "").strip(): c for c in cards}
     updated: List[ReportRecord] = []
 
     for rec in records:
-        ov = overlays.get(rec.source_card_id)
+        card = card_by_work_order.get(rec.work_order_no)
+        if not card:
+            updated.append(rec)
+            continue
+
+        ov = overlays.get(str(card.id))
         if not ov:
             updated.append(rec)
             continue
@@ -450,7 +466,7 @@ def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, Sc
         next_rec = ReportRecord(**{**rec.__dict__})
         if ov.workers:
             next_rec.workers = ov.workers
-        if ov.brand:
+        if (not next_rec.brand.strip()) and ov.brand:
             next_rec.brand = ov.brand
         if ov.delivery_status:
             next_rec.delivery_status = ov.delivery_status
@@ -633,14 +649,52 @@ def _query_work_order_cards(db: Session) -> List[Card]:
     return cards
 
 
+def _build_report_records(db: Session) -> List[ReportRecord]:
+    cards = _query_work_order_cards(db)
+    records = [_to_record(card) for card in cards]
+    return _apply_schedule_overlays(records, _load_schedule_overlays(), cards)
+
+
+def _get_report_spec(spec_key: str) -> ReportSpec:
+    for spec in REPORT_SPECS:
+        if spec.key == spec_key:
+            return spec
+    raise ValueError(f"Unknown report key: {spec_key}")
+
+
+def _serialize_rows(rows: List[ReportRecord], columns: List[str]) -> List[Dict[str, str]]:
+    return [{col: _column_value(rec, col) for col in columns} for rec in rows]
+
+
+def get_pending_report_details(db: Session, run_date: Optional[date] = None) -> Dict[str, object]:
+    today = run_date or _today_local()
+    records = _build_report_records(db)
+
+    delivery_spec = _get_report_spec("delivery_pending")
+    installation_spec = _get_report_spec("installation_pending")
+
+    delivery_rows = [rec for rec in records if delivery_spec.include(rec, today)]
+    installation_rows = [rec for rec in records if installation_spec.include(rec, today)]
+
+    return {
+        "date": today.isoformat(),
+        "delivery": {
+            "columns": delivery_spec.columns,
+            "rows": _serialize_rows(delivery_rows, delivery_spec.columns),
+        },
+        "installation": {
+            "columns": installation_spec.columns,
+            "rows": _serialize_rows(installation_rows, installation_spec.columns),
+        },
+    }
+
+
 def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict[str, str]:
     today = run_date or _today_local()
     template_dir = Path(os.getenv("REPORT_TEMPLATES_DIR", "/app/report_templates"))
     output_dir = Path(os.getenv("REPORT_OUTPUT_DIR", "/app/reports/daily"))
 
-    cards = _query_work_order_cards(db)
-    records = [_to_record(card) for card in cards]
-    records = _apply_schedule_overlays(records, _load_schedule_overlays())
+    records = _build_report_records(db)
 
     outputs: Dict[str, str] = {}
     missing_templates: List[str] = []

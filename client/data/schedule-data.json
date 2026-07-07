@@ -1,60 +1,48 @@
 {
   "pending-delivery": [
     {
-      "id": "wo-1782836601824",
-      "sourceCardId": "1782836601824",
-      "woCode": "3265",
+      "id": "wo-1783089188719-c29bc820a3a5b8",
+      "sourceCardId": "1783089188719-c29bc820a3a5b8",
+      "woCode": "2005",
       "scheduleType": "Delivery",
       "listId": "pending-delivery",
       "workers": [],
       "isEmergency": false,
-      "paymentPercent": 0,
+      "paymentPercent": 30,
       "isConfirmed": false,
       "remarks": [],
-      "createdAt": "2026-06-30T16:23:21.831478+00:00"
-    },
-    {
-      "id": "wo-1782842208627",
-      "sourceCardId": "1782842208627",
-      "woCode": "3265",
-      "scheduleType": "Delivery",
-      "listId": "pending-delivery",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": false,
-      "remarks": [],
-      "createdAt": "2026-06-30T17:56:48.645959+00:00"
+      "createdAt": "2026-07-03T14:33:08.767642+00:00",
+      "customer": "sdvsdv",
+      "location": "sdvsdv",
+      "tankSize": "vdsvds",
+      "contactPerson": "vSDV",
+      "phone": "sdvds",
+      "salesPerson": "vsv",
+      "brand": "PIPPECO",
+      "productType": "Non-Insulated"
     }
   ],
   "pending-installation": [
     {
-      "id": "wo-1782821922184",
-      "sourceCardId": "1782821922184",
-      "woCode": "7485",
+      "id": "wo-1783089128877-a2f378849dff88",
+      "sourceCardId": "1783089128877-a2f378849dff88",
+      "woCode": "2003",
       "scheduleType": "Installation",
       "listId": "pending-installation",
       "workers": [],
       "isEmergency": false,
-      "paymentPercent": 0,
+      "paymentPercent": 70,
       "isConfirmed": false,
       "remarks": [],
-      "createdAt": "2026-06-30T12:18:42.200141+00:00",
-      "customer": "JOYAL ANTONY",
-      "salesPerson": "joyal"
-    },
-    {
-      "id": "wo-1782842239697",
-      "sourceCardId": "1782842239697",
-      "woCode": "6598",
-      "scheduleType": "Installation",
-      "listId": "pending-installation",
-      "workers": [],
-      "isEmergency": false,
-      "paymentPercent": 0,
-      "isConfirmed": false,
-      "remarks": [],
-      "createdAt": "2026-06-30T17:57:19.705152+00:00"
+      "createdAt": "2026-07-03T14:32:08.925023+00:00",
+      "customer": "zsdvz",
+      "location": "vzsdv",
+      "tankSize": "aergaerga",
+      "contactPerson": "grga",
+      "phone": "gaerg",
+      "salesPerson": "vzsdv",
+      "brand": "PIPPECO",
+      "productType": "Insulated"
     }
   ],
   "delivery-2026-06-27": [],
@@ -69,5 +57,57 @@
   "delivery-2026-07-03": [],
   "delivery-2026-07-04": [],
   "delivery-2026-07-06": [],
-  "delivery-2026-07-07": []
+  "delivery-2026-07-07": [
+    {
+      "id": "wo-1783089167074-cf3898929babf8",
+      "sourceCardId": "1783089167074-cf3898929babf8",
+      "woCode": "2004",
+      "scheduleType": "Delivery",
+      "listId": "delivery-2026-07-07",
+      "workers": [
+        "shukkur"
+      ],
+      "isEmergency": false,
+      "paymentPercent": 50,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-03T14:32:47.122111+00:00",
+      "customer": "szDvsd",
+      "location": "vsdvsd",
+      "tankSize": "sdgsad",
+      "contactPerson": "sdgsd",
+      "phone": "gsdgsdgs",
+      "salesPerson": "ZBSD",
+      "brand": "PIPPECO",
+      "productType": "Insulated / Non-Insulated",
+      "deliveryStatus": "curruntly working"
+    }
+  ],
+  "installation-2026-07-07": [
+    {
+      "id": "wo-1783089102574-d08dbf3737b62",
+      "sourceCardId": "1783089102574-d08dbf3737b62",
+      "woCode": "2002",
+      "scheduleType": "Installation",
+      "listId": "installation-2026-07-07",
+      "workers": [
+        "shukkur"
+      ],
+      "isEmergency": false,
+      "paymentPercent": 30,
+      "isConfirmed": true,
+      "remarks": [],
+      "createdAt": "2026-07-03T14:31:42.622298+00:00",
+      "customer": "vdv",
+      "location": "sdvds",
+      "tankSize": "ergsergsre",
+      "contactPerson": "gawreg",
+      "phone": "aerger",
+      "salesPerson": " zx vzdx",
+      "brand": "PIPPECO",
+      "productType": "Insulated / Non-Insulated",
+      "installationStatus": "installation almost done waiting for last 10 persentage payment",
+      "confirmedDate": "2026-07-07"
+    }
+  ]
 }

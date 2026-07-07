@@ -99,6 +99,27 @@ export interface AppDataResponse {
   departments: ApiDepartment[];
 }
 
+export interface PendingReportRow {
+  [key: string]: string;
+}
+
+export interface PendingReportDetailsResponse {
+  date: string;
+  delivery: {
+    columns: string[];
+    rows: PendingReportRow[];
+  };
+  installation: {
+    columns: string[];
+    rows: PendingReportRow[];
+  };
+}
+
+export const fetchPendingReportDetails = (forDate?: string): Promise<PendingReportDetailsResponse> => {
+  const q = forDate ? `?for_date=${encodeURIComponent(forDate)}` : '';
+  return req<PendingReportDetailsResponse>(`/reports/daily/pending-details${q}`);
+};
+
 // ── User / Auth ───────────────────────────────────────────────────────────
 
 export const getAppData = async (): Promise<AppDataResponse> => {

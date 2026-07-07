@@ -11,7 +11,7 @@ import {
   TrendingUp, Clock, ArrowUp,
 } from 'lucide-react';
 import { Card as WorkOrderCard, ChannelType, ScheduleStage } from '@/types';
-import { fetchCards, updateCard } from '@/lib/api';
+import { fetchCards, updateCard, fetchPendingReportDetails, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -850,6 +850,10 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const [scheduleLoaded, setScheduleLoaded] = useState(false);
   const [woSearch, setWoSearch] = useState('');
   const [workOrderCards, setWorkOrderCards] = useState<WorkOrderCard[]>([]);
+  const [isPendingFullscreen, setIsPendingFullscreen] = useState(false);
+  const [pendingDetails, setPendingDetails] = useState<PendingReportDetailsResponse | null>(null);
+  const [pendingDetailsLoading, setPendingDetailsLoading] = useState(false);
+  const [pendingDetailsError, setPendingDetailsError] = useState('');
 
   const ganttRef   = useRef<HTMLDivElement>(null);
   const delRef     = useRef<HTMLDivElement>(null);
@@ -1156,6 +1160,54 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     {Icon:Clock,    bg:'bg-amber-50',   ic:'text-amber-500',   label:'Pending Tasks',       val:totalPend,  trend:'-1 vs last week',    up:false},
   ];
 
+  const loadPendingDetails = useCallback(async () => {
+    setPendingDetailsLoading(true);
+    setPendingDetailsError('');
+    try {
+      const reportDate = format(new Date(), 'yyyy-MM-dd');
+      const payload = await fetchPendingReportDetails(reportDate);
+      setPendingDetails(payload);
+    } catch (err) {
+      setPendingDetailsError((err as Error)?.message || 'Unable to load pending report details.');
+      setPendingDetails(null);
+    } finally {
+      setPendingDetailsLoading(false);
+    }
+  }, []);
+
+  const openPendingFullscreen = useCallback(() => {
+    setIsPendingFullscreen(true);
+    void loadPendingDetails();
+  }, [loadPendingDetails]);
+
+  const renderPendingDetailsTable = (columns: string[], rows: PendingReportRow[], emptyText: string) => (
+    <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-gray-100 bg-white">
+      <table className="min-w-full text-xs text-left">
+        <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
+          <tr>
+            {columns.map(col => (
+              <th key={col} className="px-2.5 py-2 font-semibold text-gray-700 whitespace-nowrap">{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr key={`${row['Work Order No.'] || row['W.O.NO.'] || row['WO'] || idx}-${idx}`} className="border-b border-gray-100 odd:bg-white even:bg-gray-50/50">
+              {columns.map(col => (
+                <td key={`${idx}-${col}`} className="px-2.5 py-1.5 align-top text-gray-700 whitespace-nowrap">{row[col] || '—'}</td>
+              ))}
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={Math.max(1, columns.length)} className="px-3 py-5 text-center text-gray-400 italic">{emptyText}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
   /* ── Date Grid ─────────────────────────────────────────────────────────── */
 
   const renderDateGrid=(cat:'delivery'|'installation')=>{
@@ -1399,6 +1451,14 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
               </select>
               <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"/>
             </div>
+            <button
+              onClick={openPendingFullscreen}
+              className="w-8 h-8 rounded-lg border border-gray-200 bg-white text-base hover:bg-gray-50 transition-colors"
+              title="Open pending in full screen"
+              aria-label="Open pending in full screen"
+            >
+              🖥️
+            </button>
           </div>
         </div>
         {/* two columns */}
@@ -1535,6 +1595,70 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         <WorkersModal destId={pendingDrop.dstId}
           onConfirm={w=>{performMove(pendingDrop.srcId,pendingDrop.dstId,pendingDrop.cardId,pendingDrop.dstIdx,w);setPendingDrop(null);}}
           onCancel={()=>setPendingDrop(null)}/>)}
+
+      {isPendingFullscreen && (
+        <div className="fixed inset-0 z-50 bg-black/60 p-3 sm:p-5">
+          <div className="h-full w-full bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">Pending Full Screen</h3>
+                <p className="text-xs text-gray-500">
+                  Delivery Pending details (left) and Installation Pending details (right)
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { void loadPendingDetails(); }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 hover:bg-gray-50"
+                >
+                  Refresh
+                </button>
+                <button onClick={() => setIsPendingFullscreen(false)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2">
+              <section className="min-h-0 flex flex-col p-3 border-b lg:border-b-0 lg:border-r border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-amber-700">Delivery Pending</h4>
+                  <span className="text-xs text-gray-500">{pendingDetails?.delivery.rows.length ?? 0} rows</span>
+                </div>
+                {pendingDetailsLoading ? (
+                  <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-gray-500">Loading delivery details...</div>
+                ) : pendingDetailsError ? (
+                  <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-red-600 text-center px-6">{pendingDetailsError}</div>
+                ) : (
+                  renderPendingDetailsTable(
+                    pendingDetails?.delivery.columns ?? [],
+                    pendingDetails?.delivery.rows ?? [],
+                    'No delivery pending rows for this date.'
+                  )
+                )}
+              </section>
+
+              <section className="min-h-0 flex flex-col p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-indigo-700">Installation Pending</h4>
+                  <span className="text-xs text-gray-500">{pendingDetails?.installation.rows.length ?? 0} rows</span>
+                </div>
+                {pendingDetailsLoading ? (
+                  <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-gray-500">Loading installation details...</div>
+                ) : pendingDetailsError ? (
+                  <div className="flex-1 min-h-0 flex items-center justify-center text-sm text-red-600 text-center px-6">{pendingDetailsError}</div>
+                ) : (
+                  renderPendingDetailsTable(
+                    pendingDetails?.installation.columns ?? [],
+                    pendingDetails?.installation.rows ?? [],
+                    'No installation pending rows for this date.'
+                  )
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
