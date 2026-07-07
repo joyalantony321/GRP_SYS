@@ -237,7 +237,7 @@ def _normalize_overlay_brand(value: str) -> str:
     upper = raw.upper()
     if "COLEX" in upper:
         return "COLEX TANKS"
-    if "PIPECO" in upper or "PIPPECO" in upper:
+    if "PIPECO" in upper or "PIPECO" in upper:
         return "PIPECO TANKS"
     return raw
 

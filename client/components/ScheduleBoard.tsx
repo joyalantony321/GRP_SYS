@@ -61,13 +61,13 @@ const GANTT_VISIBLE_DAYS = 9;
 const GANTT_TOTAL_DAYS = 16;
 const GANTT_MIN_DAY_WIDTH = 36;
 const GANTT_MAX_DAY_WIDTH = 160;
-const BRAND_OPTIONS = ['COLEX', 'PIPPECO'] as const;
+const BRAND_OPTIONS = ['COLEX', 'PIPECO'] as const;
 
 const normalizeBrand = (brand?: string): string | undefined => {
   if (!brand) return undefined;
   const upper = brand.toUpperCase();
   if (upper.includes('COLEX')) return 'COLEX';
-  if (upper.includes('PIPECO') || upper.includes('PIPPECO')) return 'PIPPECO';
+  if (upper.includes('PIPECO') || upper.includes('PIPECO')) return 'PIPECO';
   return brand;
 };
 
@@ -100,6 +100,11 @@ const derivePhoneNumber = (card: WorkOrderCard): string | undefined => {
 };
 
 const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
+
+const normalizeWoCode = (value?: string): string => (value ?? '').trim().replace(/^WO-/i, '');
+
+const deriveWoCode = (card: WorkOrderCard): string =>
+  normalizeWoCode((card.workOrderNumber || card.quoteNumber || '').split('/').pop() || String(card.id));
 
 const isCardDelayedOnDate = (card: ScCard, day: string) => {
   const target = startOfDay(parseISO(day)).getTime();
@@ -143,7 +148,7 @@ const sortScheduleGroup = (cards: ScCard[]) => {
     if (left.isEmergency !== right.isEmergency) return left.isEmergency ? -1 : 1;
     const timeDiff = entryTime(left) - entryTime(right);
     if (timeDiff !== 0) return timeDiff;
-    return left.woCode.localeCompare(right.woCode);
+    return normalizeWoCode(left.woCode).localeCompare(normalizeWoCode(right.woCode));
   });
 };
 
@@ -163,7 +168,7 @@ const hasExplicitScheduleMetadata = (card: WorkOrderCard): boolean => {
 
 const toScheduleCard = (card: WorkOrderCard): ScCard => {
   const scheduleType = inferScheduleTypeFromWorkOrder(card);
-  const woCode = (card.workOrderNumber || card.quoteNumber || '').split('/').pop() || String(card.id);
+  const woCode = deriveWoCode(card);
   const details = card.workOrderDetails;
   return {
     id: `wo-${card.id}`,
@@ -209,6 +214,7 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
       // Keep current schedule placement, but always mirror latest WO fields.
       // Use direct assignment (not OR-fallback) so Schedule stays an exact
       // reflection of Work Order values, including clear/reset updates.
+      existing.woCode = deriveWoCode(wo);
       existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : 0;
       existing.customer = wo.customerName || wo.customerCompanyName || undefined;
       existing.location = wo.projectLocation || undefined;
@@ -257,7 +263,10 @@ const normalizeStore = (raw: unknown): ScStore => {
   if (!raw || typeof raw !== 'object') return normalized;
   Object.entries(raw as Record<string, unknown>).forEach(([key, value]) => {
     if (Array.isArray(value)) {
-      normalized[key] = value as ScCard[];
+      normalized[key] = (value as ScCard[]).map(card => ({
+        ...card,
+        woCode: normalizeWoCode(card.woCode),
+      }));
     }
   });
   return normalized;
@@ -282,6 +291,8 @@ const pendDot = (card: ScCard) => (card.returnedFromDate ? '#ef4444' : '');
 function CardChip({
   card, listId, index, isPending, onOpen,
 }: { card: ScCard; listId: string; index: number; isPending?: boolean; onOpen: () => void }) {
+  const [tipPos, setTipPos] = useState<{x:number;y:number}|null>(null);
+  const woCode = normalizeWoCode(card.woCode);
   const dot = isPending ? pendDot(card) : dateDot(card);
   const showDot = Boolean(dot);
   const chipBg = pBg(card.paymentPercent);
@@ -292,33 +303,122 @@ function CardChip({
       ? card.deliveryStatus
     : undefined;
   const compact = !isPending;
+  const payPct = card.paymentPercent ?? 0;
   return (
     <Draggable draggableId={card.id} index={index}>
       {(prov, snap) => (
-        <div
-          ref={prov.innerRef}
-          {...prov.draggableProps}
-          {...prov.dragHandleProps}
-          onClick={e => { e.stopPropagation(); onOpen(); }}
-          className={`flex items-center rounded-md border cursor-grab select-none transition-all mb-0.5 min-w-0
-            ${compact ? 'gap-1 px-1.5 py-0.5' : 'gap-1.5 px-2 py-1'}
-            ${card.isEmergency ? 'ring-1 ring-red-300' : ''}
-            ${snap.isDragging ? 'shadow-lg opacity-80' : 'hover:shadow-sm'}`}
-          style={{
-            ...(prov.draggableProps.style as React.CSSProperties),
-            backgroundColor: chipBg,
-            borderColor: card.isEmergency ? '#ef4444' : '#9ca3af',
-          }}
-        >
-          {showDot && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />}
-          <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-semibold text-gray-800 flex-shrink-0`}>{card.woCode}</span>
-          {isPending && meta && <span className="text-[10px] text-gray-600 truncate min-w-0">{meta}</span>}
-          {statusText && <span className="text-[10px] text-indigo-600 truncate min-w-0">{statusText}</span>}
-          {card.isEmergency && <ArrowUp className="w-3 h-3 text-red-500 flex-shrink-0 ml-auto" />}
-          {isPending && card.returnedFromDate && <span className="text-xs text-red-400 ml-auto">↩</span>}
-        </div>
+        <>
+          <div
+            ref={prov.innerRef}
+            {...prov.draggableProps}
+            {...prov.dragHandleProps}
+            onClick={e => { e.stopPropagation(); onOpen(); }}
+            onMouseEnter={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
+            onMouseMove={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
+            onMouseLeave={() => setTipPos(null)}
+            className={`flex items-center rounded-md border cursor-grab select-none transition-all mb-0.5 min-w-0
+              ${compact ? 'gap-1 px-1.5 py-0.5' : 'gap-1.5 px-2 py-1'}
+              ${card.isEmergency ? 'ring-1 ring-red-300' : ''}
+              ${snap.isDragging ? 'shadow-lg opacity-80' : 'hover:shadow-sm'}`}
+            style={{
+              ...(prov.draggableProps.style as React.CSSProperties),
+              backgroundColor: chipBg,
+              borderColor: card.isEmergency ? '#ef4444' : '#9ca3af',
+            }}
+          >
+            {showDot && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />}
+            <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-semibold text-gray-800 flex-shrink-0`}>{woCode}</span>
+            <span className="text-[10px] font-bold flex-shrink-0" style={{color:pColor(payPct)}}>{payPct}%</span>
+            {isPending && meta && <span className="text-[10px] text-gray-600 truncate min-w-0">{meta}</span>}
+            {statusText && <span className="text-[10px] text-indigo-600 truncate min-w-0">{statusText}</span>}
+            {card.isEmergency && <ArrowUp className="w-3 h-3 text-red-500 flex-shrink-0 ml-auto" />}
+            {isPending && card.returnedFromDate && <span className="text-xs text-red-400 ml-auto">↩</span>}
+          </div>
+          {tipPos && (
+            <div style={{position:'fixed',left:tipPos.x+12,top:tipPos.y+16,zIndex:9999,backgroundColor:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'6px 10px',fontSize:11,color:'#374151',boxShadow:'0 4px 12px rgba(0,0,0,0.12)',pointerEvents:'none',whiteSpace:'nowrap',minWidth:140}}>
+              <div style={{fontWeight:700,fontSize:12,color:'#111827',marginBottom:3}}>WO: {woCode}</div>
+              {card.brand && <div style={{marginBottom:1}}>Brand: <b>{card.brand}</b></div>}
+              {card.tankSize && <div style={{marginBottom:1}}>Tank: <b>{card.tankSize}</b></div>}
+              {card.location && <div style={{marginBottom:1}}>Location: {card.location}</div>}
+              {statusText && <div style={{color:'#4f46e5',marginBottom:1}}>{statusText}</div>}
+              <div style={{color:pColor(payPct),fontWeight:700,marginTop:2}}>Payment: {payPct}%</div>
+            </div>
+          )}
+        </>
       )}
     </Draggable>
+  );
+}
+
+/* ─── GanttBarChip – spanning gantt bar with hover tooltip ────────────────── */
+
+function GanttBarChip({
+  card, progressedDays, segments, leftPct, widthPct, rowIdx, onOpen,
+}: {
+  card: ScCard; progressedDays: number;
+  segments: Array<{key:string;color:string;flex:number}>;
+  leftPct: number; widthPct: number; rowIdx: number;
+  onOpen: () => void;
+}) {
+  const [tipPos, setTipPos] = useState<{x:number;y:number}|null>(null);
+  const payPct = card.paymentPercent ?? 0;
+  const woCode = normalizeWoCode(card.woCode);
+  const outerBorder = card.isEmergency ? '#dc2626' : '#4b5563';
+  return (
+    <>
+      <div
+        onClick={onOpen}
+        onMouseEnter={e => setTipPos({x:e.clientX,y:e.clientY})}
+        onMouseMove={e => setTipPos({x:e.clientX,y:e.clientY})}
+        onMouseLeave={() => setTipPos(null)}
+        style={{
+          position:'absolute',
+          left:`${leftPct}%`,
+          width:`${widthPct}%`,
+          top:rowIdx*26+4,
+          height:21,
+          backgroundColor:'white',
+          border:`2px solid ${outerBorder}`,
+          borderRadius:8,
+          display:'flex',alignItems:'center',
+          padding:0,cursor:'pointer',overflow:'hidden',
+          boxSizing:'border-box',
+        }}
+      >
+        <div style={{flex:1,height:13,borderRadius:5,display:'flex',overflow:'hidden'}}>
+          {segments.map((seg,idx)=>(
+            <div key={seg.key} style={{flex:seg.flex,height:'100%',borderRadius:idx===0?'4px 0 0 4px':idx===segments.length-1?'0 4px 4px 0':0,backgroundColor:seg.color,display:'flex',alignItems:'center',overflow:'hidden',paddingLeft:idx===0?4:0}}>
+            </div>
+          ))}
+        </div>
+        <div
+          style={{
+            position:'absolute',
+            inset:0,
+            display:'flex',
+            alignItems:'center',
+            paddingLeft:10,
+            paddingRight:8,
+            pointerEvents:'none',
+            overflow:'hidden',
+          }}
+        >
+          <span style={{color:'white',fontSize:10,fontWeight:700,letterSpacing:'0.02em',textShadow:'0 1px 2px rgba(0,0,0,0.35)',whiteSpace:'nowrap'}}>
+            {woCode} · {progressedDays}d · {payPct}%
+          </span>
+        </div>
+      </div>
+      {tipPos && (
+        <div style={{position:'fixed',left:tipPos.x+12,top:tipPos.y+16,zIndex:9999,backgroundColor:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'6px 10px',fontSize:11,color:'#374151',boxShadow:'0 4px 12px rgba(0,0,0,0.12)',pointerEvents:'none',whiteSpace:'nowrap',minWidth:140}}>
+          <div style={{fontWeight:700,fontSize:12,color:'#111827',marginBottom:3}}>WO: {woCode}</div>
+          {card.brand && <div style={{marginBottom:1}}>Brand: <b>{card.brand}</b></div>}
+          {card.tankSize && <div style={{marginBottom:1}}>Tank: <b>{card.tankSize}</b></div>}
+          {card.location && <div style={{marginBottom:1}}>Location: {card.location}</div>}
+          {card.installationStatus && <div style={{color:'#4f46e5',marginBottom:1}}>{card.installationStatus}</div>}
+          <div style={{color:pColor(payPct),fontWeight:700,marginTop:2}}>Payment: {payPct}%</div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -336,7 +436,7 @@ function AddCardModal({ type, onClose, onAdd }: { type: 'delivery'|'installation
   const submit = () => {
     if (!wo.trim()) { setErr('WO Number is required'); return; }
     if (!/^\d{4}$/.test(wo)) { setErr('Must be exactly 4 digits'); return; }
-    onAdd({ id:`${type[0]}${Date.now()}`, woCode:wo, listId:`pending-${type}`, workers:[], isEmergency:emergency, paymentPercent:0, isConfirmed:false, remarks:[], createdAt:new Date().toISOString(), customer:customer||undefined, brand:brand||undefined, productType:productType||undefined, location:location||undefined, tankSize:tankSize||undefined, contactPerson:contact||undefined, phone:phone||undefined, salesPerson:sales||undefined, deliveryStatus:type==='delivery' ? (deliveryStatus.trim() || undefined) : undefined, installationStatus:type==='installation' ? (installationStatus.trim() || undefined) : undefined });
+    onAdd({ id:`${type[0]}${Date.now()}`, woCode:normalizeWoCode(wo), listId:`pending-${type}`, workers:[], isEmergency:emergency, paymentPercent:0, isConfirmed:false, remarks:[], createdAt:new Date().toISOString(), customer:customer||undefined, brand:brand||undefined, productType:productType||undefined, location:location||undefined, tankSize:tankSize||undefined, contactPerson:contact||undefined, phone:phone||undefined, salesPerson:sales||undefined, deliveryStatus:type==='delivery' ? (deliveryStatus.trim() || undefined) : undefined, installationStatus:type==='installation' ? (installationStatus.trim() || undefined) : undefined });
     onClose();
   };
   return (
@@ -519,7 +619,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm text-white shrink-0 ${ec.isEmergency ? 'bg-red-500' : 'bg-purple-600'}`}>
-              {ec.woCode}
+              {normalizeWoCode(ec.woCode)}
             </div>
             <div className="min-w-0">
               <h2 className="text-base font-bold text-gray-900 truncate leading-tight">
@@ -836,11 +936,13 @@ interface Props {
 }
 
 const NUM_COLS = 8;
+const INSTALLATION_COLS = 9;
 
 export default function ScheduleBoard({ userName, userDepartment, userRole, onChannelSwitch, accessibleChannels=[] }: Props) {
   const [store, setStore]           = useState<ScStore>(EMPTY_STORE);
   const [delOff,  setDelOff]        = useState(-2);
-  const [instOff, setInstOff]       = useState(-2);
+  // Default installation window: 5 past days, today, 3 future days.
+  const [instOff, setInstOff]       = useState(-5);
   const [ganttDW, setGanttDW]       = useState(72);
   const [addCardType, setAddCardType] = useState<'delivery'|'installation'|null>(null);
   const [selected, setSelected]     = useState<{card:ScCard;listId:string}|null>(null);
@@ -863,6 +965,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workOrderCardsRef = useRef<WorkOrderCard[]>([]);
   const syncedSignatureRef = useRef<Record<string, string>>({});
+  const delDragRef = useRef<{ startX: number; startOff: number } | null>(null);
+  const instDragRef = useRef<{ startX: number; startOff: number } | null>(null);
 
   const getSyncSignature = (sc: ScCard) => {
     // scheduleType intentionally excluded — Work Order is the authority for type;
@@ -877,6 +981,15 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       sc.installationStatus ?? '',
     ].join('|');
   };
+
+  const startDateDrag = useCallback((kind: 'delivery' | 'installation', e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const dragState = { startX: e.clientX, startOff: kind === 'delivery' ? delOff : instOff };
+    if (kind === 'delivery') delDragRef.current = dragState;
+    else instDragRef.current = dragState;
+    document.body.style.userSelect = 'none';
+  }, [delOff, instOff]);
 
   useEffect(() => {
     workOrderCardsRef.current = workOrderCards;
@@ -1030,7 +1143,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         const pKey=isD?'pending-delivery':'pending-installation';
         if(!next[pKey])next[pKey]=[];
         unconf.forEach(card=>{
-          if(!next[pKey].some(c=>c.woCode===card.woCode&&c.returnedFromDate===dk)){
+          if(!next[pKey].some(c=>normalizeWoCode(c.woCode)===normalizeWoCode(card.woCode)&&c.returnedFromDate===dk)){
             next[pKey]=[{...card,id:`${card.id}-ret`,listId:pKey,returnedFromDate:dk,isConfirmed:false},...next[pKey]];
             dirty=true;
           }});
@@ -1062,14 +1175,53 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   /* horizontal wheel for date grids only */
   useEffect(()=>{
     const el=delRef.current; if(!el)return;
-    const h=(e:WheelEvent)=>{ e.preventDefault(); const d=e.deltaX!==0?e.deltaX:e.deltaY; setDelOff(p=>p+(d>0?1:-1)); };
+    const h=(e:WheelEvent)=>{
+      // Keep default vertical scroll. Use Shift+wheel for date navigation.
+      if(!e.shiftKey) return;
+      e.preventDefault();
+      const d=e.deltaX!==0?e.deltaX:e.deltaY;
+      setDelOff(p=>p+(d>0?1:-1));
+    };
     el.addEventListener('wheel',h,{passive:false}); return ()=>el.removeEventListener('wheel',h);
   },[]);
   useEffect(()=>{
     const el=instRef.current; if(!el)return;
-    const h=(e:WheelEvent)=>{ e.preventDefault(); const d=e.deltaX!==0?e.deltaX:e.deltaY; setInstOff(p=>p+(d>0?1:-1)); };
+    const h=(e:WheelEvent)=>{
+      // Keep default vertical scroll. Use Shift+wheel for date navigation.
+      if(!e.shiftKey) return;
+      e.preventDefault();
+      const d=e.deltaX!==0?e.deltaX:e.deltaY;
+      setInstOff(p=>p+(d>0?1:-1));
+    };
     el.addEventListener('wheel',h,{passive:false}); return ()=>el.removeEventListener('wheel',h);
   },[]);
+
+  useEffect(() => {
+    const DRAG_STEP_PX = 64;
+    const onMove = (e: MouseEvent) => {
+      if (delDragRef.current) {
+        const steps = Math.trunc((delDragRef.current.startX - e.clientX) / DRAG_STEP_PX);
+        setDelOff(delDragRef.current.startOff + steps);
+      }
+      if (instDragRef.current) {
+        const steps = Math.trunc((instDragRef.current.startX - e.clientX) / DRAG_STEP_PX);
+        setInstOff(instDragRef.current.startOff + steps);
+      }
+    };
+    const onUp = () => {
+      delDragRef.current = null;
+      instDragRef.current = null;
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
   /* gantt: show 9 days by default; native horizontal scroll pans timeline; Ctrl+scroll zooms day width */
   useEffect(() => {
     const fitDays = () => {
@@ -1143,7 +1295,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const woQuery = woSearch.trim().toLowerCase();
   const matchesWo = useCallback((card: ScCard)=>{
     if(!woQuery) return true;
-    return card.woCode.toLowerCase().includes(woQuery);
+    return normalizeWoCode(card.woCode).toLowerCase().includes(woQuery);
   }, [woQuery]);
 
   /* ── Stats ─────────────────────────────────────────────────────────────── */
@@ -1235,14 +1387,17 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           </div>
         </div>
         {/* date column headers */}
-        <div ref={ref} className="flex flex-1 min-h-0 overflow-hidden">
+        <div ref={ref} className="flex flex-1 min-h-0 overflow-hidden" onMouseDown={e => startDateDrag(cat, e)}>
           {dates.map(date=>{
             const dk=format(date,'yyyy-MM-dd'); const lid=`${prefix}${dk}`;
-            const isTod=isToday(date); const isSun=isSunday(date); const cards=getCards(lid).filter(matchesWo);
+            const isTod=isToday(date); const isSun=isSunday(date); const cards=sortScheduleGroup(getCards(lid).filter(matchesWo));
             return (
               <div key={dk} className={`flex-1 min-w-0 flex flex-col border-r border-gray-100 last:border-r-0 ${isTod?'bg-blue-50/40':''}`}>
                 {/* day header */}
-                <div className={`flex flex-col items-center py-1.5 border-b border-gray-100 flex-shrink-0 ${isTod?'bg-blue-500':isSun?'bg-gray-100':''}`}>
+                <div
+                  onMouseDown={e => startDateDrag(cat, e)}
+                  className={`flex flex-col items-center py-1.5 border-b border-gray-100 flex-shrink-0 cursor-ew-resize ${isTod?'bg-blue-500':isSun?'bg-gray-100':''}`}
+                >
                   <span className={`text-xs font-semibold uppercase tracking-wider ${isTod?'text-white':isSun?'text-red-400':'text-gray-400'}`}>
                     {format(date,'EEE')}
                   </span>
@@ -1251,10 +1406,10 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                   </span>
                   {isSun&&<span className="text-xs text-red-400 font-semibold leading-none">OFF</span>}
                 </div>
-                <Droppable droppableId={lid} isDropDisabled={isSun}>
+                <Droppable droppableId={lid} isDropDisabled={isSun} direction="vertical">
                   {(prov,snap)=>(
                     <div ref={prov.innerRef} {...prov.droppableProps}
-                      className={`flex-1 overflow-y-auto p-1 ${snap.isDraggingOver?(isSun?'bg-red-50':'bg-blue-50'):''}`}>
+                      className={`flex-1 overflow-y-auto scrollbar-hide p-1 pb-36 ${snap.isDraggingOver?(isSun?'bg-red-50':'bg-blue-50'):''}`}>
                       {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
                       {prov.placeholder}
                       {isSun&&cards.length===0&&<p className="text-xs text-gray-300 text-center mt-2">Sunday – Off</p>}
@@ -1355,7 +1510,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                 <div key={card.id} className="flex items-center border-b border-gray-50 h-9">
                   <div style={{width:LABEL_W,flexShrink:0}}
                     className={`flex items-center px-3 border-r border-gray-100 h-full text-sm font-bold ${isEmRow?'text-red-600':'text-gray-700'}`}>
-                    {card.woCode}
+                    {normalizeWoCode(card.woCode)}
                   </div>
                   <div className="flex-1 relative h-full overflow-hidden">
                     {/* sunday shading */}
@@ -1370,8 +1525,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                         onClick={()=>setSelected({card,listId:`installation-${dk}`})}
                         style={{
                           position:'absolute',
-                          left:clampedLeft+2,
-                          width:Math.max(12,clampedWidth-4),
+                          left:clampedLeft,
+                          width:Math.max(12,clampedWidth),
                           height:21,
                           top:'50%',
                           transform:'translateY(-50%)',
@@ -1382,8 +1537,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                           boxSizing:'border-box',
                           display:'flex',
                           alignItems:'center',
-                          padding:'0 4px',
-                          gap:2,
+                          padding:0,
+                          gap:0,
                           overflow:'hidden',
                         }}
                       >
@@ -1392,7 +1547,6 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                             key={segment.key}
                             style={{
                               flex: 1,
-                              minWidth: Math.max(10, ganttDW - 10),
                               height: 13,
                               borderRadius: idx === 0 ? '4px 0 0 4px' : idx === segmentDays.length - 1 ? '0 4px 4px 0' : 0,
                               backgroundColor: segment.color,
@@ -1405,7 +1559,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                           >
                             {idx === 0 && (
                               <span style={{color:'white',fontSize:10,fontWeight:700,letterSpacing:'0.02em',textShadow:'0 1px 2px rgba(0,0,0,0.3)',whiteSpace:'nowrap'}}>
-                                {card.woCode} · {progressedDays}d
+                                {normalizeWoCode(card.woCode)} · {progressedDays}d
                               </span>
                             )}
                           </div>
@@ -1415,6 +1569,194 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                 </div>);
             })}
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ── Combined Installation (date grid + gantt in one panel) ──────────── */
+
+  const renderCombinedInstallation=()=>{
+    const prefix='installation-';
+    const dates=Array.from({length:INSTALLATION_COLS},(_,i)=>addDays(new Date(),instOff+i));
+    const today0 = startOfDay(new Date());
+    // Past-day columns are narrower than today/future columns in installation only.
+    const dayWeights = dates.map(d => isBefore(startOfDay(d), today0) ? 0.78 : 1);
+    const totalWeight = dayWeights.reduce((sum, w) => sum + w, 0);
+    const leftPctFor = (idx: number) => (dayWeights.slice(0, idx).reduce((s, w) => s + w, 0) / totalWeight) * 100;
+    const widthPctForRange = (startIdx: number, endIdx: number) => (dayWeights.slice(startIdx, endIdx + 1).reduce((s, w) => s + w, 0) / totalWeight) * 100;
+
+    return (
+      <div className="row-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden min-h-0">
+
+        {/* ── Installation header (date nav + gantt legend merged) ── */}
+        <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-100">
+              <Wrench className="w-4 h-4 text-indigo-600"/>
+            </span>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Installation</h3>
+              <p className="text-xs text-gray-400">{format(dates[0],'MMM d')} – {format(dates[dates.length-1],'MMM d')}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block border-2 border-gray-800"/>On Track</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block border-2 border-red-700"/>Delayed</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={()=>setInstOff(p=>p-1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"><ChevronLeft className="w-3.5 h-3.5 text-gray-500"/></button>
+              <button onClick={()=>setInstOff(p=>p+1)} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"><ChevronRight className="w-3.5 h-3.5 text-gray-500"/></button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Installation: day headers → gantt bars → droppable cards ── */}
+        <div ref={instRef} className="flex flex-col overflow-y-auto overflow-x-hidden scrollbar-hide" style={{flex:'1 1 0',minHeight:0}} onMouseDown={e => startDateDrag('installation', e)}>
+
+          {/* Row 1 – Day column headers */}
+          <div
+            onMouseDown={e => startDateDrag('installation', e)}
+            className="sticky top-0 z-20 bg-white flex flex-shrink-0 border-b border-gray-100 cursor-ew-resize"
+          >
+            {dates.map((date, idx)=>{
+              const dk=format(date,'yyyy-MM-dd');
+              const isTod=isToday(date); const isSun=isSunday(date);
+              return (
+                <div key={dk} style={{ flex: `${dayWeights[idx]} 1 0%` }} className={`min-w-0 flex flex-col items-center py-1.5 border-r border-gray-100 last:border-r-0 ${isTod?'bg-blue-500':isSun?'bg-gray-100':''}`}>
+                  <span className={`text-xs font-semibold uppercase tracking-wider ${isTod?'text-white':isSun?'text-red-400':'text-gray-400'}`}>{format(date,'EEE')}</span>
+                  <span className={`text-sm font-bold mt-0.5 ${isTod?'text-white':isSun?'text-red-400':'text-gray-700'}`}>{format(date,'d')}</span>
+                  {isSun&&<span className="text-xs text-red-400 font-semibold leading-none">OFF</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Row 2 – Chip columns (emergency-first unconfirmed cards, natural height) */}
+          <div className="flex flex-shrink-0 overflow-hidden">
+            {dates.map((date, idx)=>{
+              const dk=format(date,'yyyy-MM-dd'); const lid=`${prefix}${dk}`;
+              const isTod=isToday(date); const isSun=isSunday(date);
+              const chips=sortScheduleGroup(getCards(lid).filter(c=>matchesWo(c)&&!c.isConfirmed));
+              return (
+                <div key={dk} style={{ flex: `${dayWeights[idx]} 1 0%` }} className={`min-w-0 flex flex-col border-r border-gray-100 last:border-r-0 ${isTod?'bg-blue-50/40':''}`}>
+                  <Droppable droppableId={lid} isDropDisabled={isSun} direction="vertical">
+                    {(prov,snap)=>(
+                      <div ref={prov.innerRef} {...prov.droppableProps}
+                        className={`overflow-y-auto scrollbar-hide p-1 min-h-[36px] ${snap.isDraggingOver?(isSun?'bg-red-50':'bg-blue-50'):''}`}>
+                        {chips.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
+                        {prov.placeholder}
+                        {isSun&&chips.length===0&&<p className="text-xs text-gray-300 text-center mt-2">Sunday – Off</p>}
+                      </div>)}
+                  </Droppable>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Row 3 – Spanning gantt bars (confirmed/in-progress, absolute positioned) */}
+          {(()=>{
+            const todayDk=dateKey();
+            const confirmed:Array<{card:ScCard;bDk:string}>=[];
+            Object.keys(store).forEach(lid=>{
+              if(!lid.startsWith('installation-'))return;
+              const sDk=lid.replace(/^installation-/,'');
+              const d=startOfDay(parseISO(sDk));
+              if(isBefore(today0,d))return;
+              (store[lid]??[]).forEach(card=>{
+                if(!card.isConfirmed||!matchesWo(card))return;
+                confirmed.push({card,bDk:sDk});
+              });
+            });
+            confirmed.sort((a,b)=>{
+              const prio=(card:ScCard,dk:string)=>{
+                const startedToday=card.confirmedDate===todayDk||(!card.confirmedDate&&dk===todayDk);
+                const delayed=isCardCurrentlyDelayed(card);
+                if(card.isEmergency&&startedToday)return 0;
+                if(card.isEmergency&&!startedToday)return 1;
+                if(!card.isEmergency&&!delayed)return 2;
+                return 3;
+              };
+              const diff=prio(a.card,a.bDk)-prio(b.card,b.bDk);
+              return diff!==0?diff:a.bDk.localeCompare(b.bDk);
+            });
+            if(confirmed.length===0)return null;
+            // Pre-count only rows that will actually render (clipped to visible date window)
+            const visibleRowCount = confirmed.filter(({card,bDk})=>{
+              const startDate=startOfDay(parseISO(card.confirmedDate||bDk));
+              const endAnchor=card.completedDate?startOfDay(parseISO(card.completedDate)):today0;
+              const startDk=format(startDate,'yyyy-MM-dd');
+              const endDk=format(endAnchor,'yyyy-MM-dd');
+              let sc=dates.findIndex(d=>format(d,'yyyy-MM-dd')===startDk);
+              let ec=dates.findIndex(d=>format(d,'yyyy-MM-dd')===endDk);
+              if(sc===-1){const f=format(dates[0],'yyyy-MM-dd');sc=startDk<f?0:INSTALLATION_COLS;}
+              if(ec===-1){const l=format(dates[dates.length-1],'yyyy-MM-dd');ec=endDk>l?INSTALLATION_COLS-1:-1;}
+              return !(sc>=INSTALLATION_COLS||ec<0||sc>ec);
+            }).length;
+            if(visibleRowCount===0)return null;
+            let visibleRowIdx = 0;
+            return (
+              <div className="relative flex-shrink-0" style={{height:visibleRowCount*26+4}}>
+                <div className="absolute inset-0 pointer-events-none">
+                  {dates.slice(1).map((d, idx) => (
+                    <div
+                      key={`partition-${format(d, 'yyyy-MM-dd')}`}
+                      style={{
+                        position: 'absolute',
+                        left: `${leftPctFor(idx + 1)}%`,
+                        top: 0,
+                        bottom: 0,
+                        width: 1,
+                        backgroundColor: '#e5e7eb',
+                        opacity: 0.95,
+                      }}
+                    />
+                  ))}
+                </div>
+                {confirmed.map(({card,bDk},rowIdx)=>{
+                  const startDate=startOfDay(parseISO(card.confirmedDate||bDk));
+                  const endAnchor=card.completedDate?startOfDay(parseISO(card.completedDate)):today0;
+                  const progressedDays=Math.max(1,differenceInCalendarDays(endAnchor,startDate)+1);
+                  const startDk=format(startDate,'yyyy-MM-dd');
+                  const endDk=format(endAnchor,'yyyy-MM-dd');
+                  let startCol=dates.findIndex(d=>format(d,'yyyy-MM-dd')===startDk);
+                  let endCol=dates.findIndex(d=>format(d,'yyyy-MM-dd')===endDk);
+                  if(startCol===-1){const f=format(dates[0],'yyyy-MM-dd');startCol=startDk<f?0:INSTALLATION_COLS;}
+                  if(endCol===-1){const l=format(dates[dates.length-1],'yyyy-MM-dd');endCol=endDk>l?INSTALLATION_COLS-1:-1;}
+                  if(startCol>=INSTALLATION_COLS||endCol<0||startCol>endCol)return null;
+                  const currentRowIdx = visibleRowIdx;
+                  visibleRowIdx += 1;
+                  const leftPct=leftPctFor(startCol);
+                  const widthPct=widthPctForRange(startCol, endCol);
+                  const visibleDates = dates.slice(startCol, endCol + 1);
+                  const segments = visibleDates.map((segDateObj, idx) => {
+                    const segDate = format(segDateObj, 'yyyy-MM-dd');
+                    return {
+                      key: `${card.id}-${segDate}`,
+                      color: isCardDelayedOnDate(card, segDate) ? '#ef4444' : '#22c55e',
+                      flex: dayWeights[startCol + idx],
+                    };
+                  });
+                  return (
+                    <GanttBarChip
+                      key={card.id}
+                      card={card}
+                      progressedDays={progressedDays}
+                      segments={segments}
+                      leftPct={leftPct}
+                      widthPct={widthPct}
+                      rowIdx={currentRowIdx}
+                      onOpen={()=>setSelected({card,listId:`installation-${bDk}`})}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Spacer – fills remaining vertical space below chips+gantt */}
+          <div className="h-36 flex-shrink-0" />
         </div>
       </div>
     );
@@ -1474,10 +1816,10 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                 </div>
                 <span className="text-xs text-gray-400">Auto</span>
               </div>
-              <Droppable droppableId={lid}>
+              <Droppable droppableId={lid} direction="vertical">
                 {(prov,snap)=>(
                   <div ref={prov.innerRef} {...prov.droppableProps}
-                    className={`flex-1 overflow-y-auto p-1 ${snap.isDraggingOver?'bg-orange-50':''}`}>
+                    className={`flex-1 overflow-y-auto scrollbar-hide p-1 pb-36 ${snap.isDraggingOver?'bg-orange-50':''}`}>
                     {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} isPending onOpen={()=>setSelected({card:c,listId:lid})}/>)}
                     {prov.placeholder}
                     {!cards.length&&<p className="text-xs text-gray-300 text-center py-4 italic">No pending {label.toLowerCase()}</p>}
@@ -1561,9 +1903,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       {/* ── 4-quadrant layout ── */}
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-2 px-4 pb-3 min-h-0 overflow-hidden">
+          {renderCombinedInstallation()}
           {renderDateGrid('delivery')}
-          {renderDateGrid('installation')}
-          {renderGantt()}
           {renderPending()}
         </div>
       </DragDropContext>
