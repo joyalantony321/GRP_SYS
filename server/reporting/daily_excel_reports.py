@@ -7,7 +7,7 @@ from copy import copy
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session, joinedload
@@ -45,6 +45,7 @@ HEADER_ALIASES: Dict[str, List[str]] = {
 
 @dataclass
 class ReportRecord:
+    source_card_id: str
     work_order_no: str
     quotation_no: str
     customer: str
@@ -68,6 +69,8 @@ class ReportRecord:
     remarks: str
     schedule_type: str
     schedule_stage: str
+    schedule_list_id: str
+    requires_installation: Optional[bool]
     completed_date: Optional[date]
     updated_date: Optional[date]
 
@@ -79,6 +82,28 @@ class ScheduleOverlay:
     brand: str
     delivery_status: str
     installation_status: str
+
+
+@dataclass
+class ScheduleCardSnapshot:
+    source_card_id: str
+    wo_code: str
+    list_id: str
+    schedule_type: str
+    is_confirmed: bool
+    confirmed_date: Optional[date]
+    completed_date: Optional[date]
+    workers: str
+    brand: str
+    delivery_status: str
+    installation_status: str
+    customer: str
+    tank_size: str
+    location: str
+    contact_person: str
+    phone_number: str
+    sales_person: str
+    payment_percent: int
 
 
 @dataclass(frozen=True)
@@ -307,10 +332,9 @@ def _installation_status(rec: ReportRecord, today: date) -> bool:
 
 
 def _payment_report(rec: ReportRecord, today: date) -> bool:
-    if rec.payment_percent < 100:
-        return True
-    paid_on = _payment_completed_on(rec)
-    return paid_on == today
+    _ = today
+    # Business rule: keep showing in payment sheet every day until fully paid.
+    return rec.payment_percent < 100
 
 
 def _parse_report_date(value: str) -> Optional[date]:
@@ -343,6 +367,7 @@ def _to_record(card: Card) -> ReportRecord:
         installation_status = stage_text or status_fallback
 
     return ReportRecord(
+        source_card_id=str(card.id),
         work_order_no=(card.work_order_number or "").strip(),
         quotation_no=(card.quote_number or "").strip(),
         customer=(card.customer_company_name or (wo.company_name if wo else "") or card.customer_name or "").strip(),
@@ -366,6 +391,8 @@ def _to_record(card: Card) -> ReportRecord:
         remarks=_latest_remark(card),
         schedule_type=schedule_type,
         schedule_stage=stage_text,
+        schedule_list_id="",
+        requires_installation=(bool(wo.installation) if wo else None),
         completed_date=_as_date(card.completed_at),
         updated_date=_as_date(card.updated_at),
     )
@@ -446,6 +473,263 @@ def _load_schedule_overlays() -> Dict[str, ScheduleOverlay]:
                 installation_status=str(row.get("installationStatus") or "").strip(),
             )
     return overlays
+
+
+def _parse_iso_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if "T" in text:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+        return date.fromisoformat(text)
+    except Exception:
+        return None
+
+
+def _as_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return fallback
+
+
+def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
+    path = Path(os.getenv("REPORT_SCHEDULE_DATA_FILE", "/app/client_data/schedule-data.json"))
+    if not path.exists():
+        return []
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    if not isinstance(raw, dict):
+        return []
+
+    cards: List[ScheduleCardSnapshot] = []
+    for list_id, rows in raw.items():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            workers_raw = row.get("workers")
+            workers = ", ".join([str(w).strip() for w in workers_raw if str(w).strip()]) if isinstance(workers_raw, list) else ""
+            cards.append(
+                ScheduleCardSnapshot(
+                    source_card_id=str(row.get("sourceCardId") or "").strip(),
+                    wo_code=str(row.get("woCode") or "").strip(),
+                    list_id=str(row.get("listId") or list_id or "").strip(),
+                    schedule_type=str(row.get("scheduleType") or "").strip() or ("Installation" if str(list_id).startswith("installation-") else "Delivery"),
+                    is_confirmed=bool(row.get("isConfirmed")),
+                    confirmed_date=_parse_iso_date(row.get("confirmedDate")),
+                    completed_date=_parse_iso_date(row.get("completedDate")),
+                    workers=workers,
+                    brand=_normalize_overlay_brand(str(row.get("brand") or "")),
+                    delivery_status=str(row.get("deliveryStatus") or "").strip(),
+                    installation_status=str(row.get("installationStatus") or "").strip(),
+                    customer=str(row.get("customer") or "").strip(),
+                    tank_size=str(row.get("tankSize") or "").strip(),
+                    location=str(row.get("location") or "").strip(),
+                    contact_person=str(row.get("contactPerson") or "").strip(),
+                    phone_number=str(row.get("phone") or "").strip(),
+                    sales_person=str(row.get("salesPerson") or "").strip(),
+                    payment_percent=max(0, min(100, _as_int(row.get("paymentPercent"), 0))),
+                )
+            )
+    return cards
+
+
+def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSnapshot, today: date) -> ReportRecord:
+    if base:
+        rec = ReportRecord(**{**base.__dict__})
+    else:
+        rec = ReportRecord(
+            source_card_id=sc.source_card_id,
+            work_order_no=sc.wo_code,
+            quotation_no="",
+            customer=sc.customer,
+            tank_size=sc.tank_size,
+            brand=sc.brand,
+            tank_type="",
+            location=sc.location,
+            delivery_date="",
+            installation_date="",
+            delivery_status="",
+            installation_status="",
+            delivery_completion_date="",
+            installation_completion_date="",
+            contact_person=sc.contact_person,
+            phone_number=sc.phone_number,
+            sales_person=sc.sales_person,
+            workers="",
+            payment_percent=sc.payment_percent,
+            payment_status=_payment_status(sc.payment_percent),
+            pdc_cheque="0%",
+            remarks="",
+            schedule_type=sc.schedule_type,
+            schedule_stage="",
+            schedule_list_id=sc.list_id,
+            requires_installation=None,
+            completed_date=sc.completed_date,
+            updated_date=today,
+        )
+
+    rec.schedule_list_id = sc.list_id
+    if sc.workers:
+        rec.workers = sc.workers
+    if (not rec.brand.strip()) and sc.brand:
+        rec.brand = sc.brand
+    if sc.delivery_status:
+        rec.delivery_status = sc.delivery_status
+    if sc.installation_status:
+        rec.installation_status = sc.installation_status
+    if (not rec.work_order_no.strip()) and sc.wo_code:
+        rec.work_order_no = sc.wo_code
+    if (not rec.customer.strip()) and sc.customer:
+        rec.customer = sc.customer
+    if (not rec.tank_size.strip()) and sc.tank_size:
+        rec.tank_size = sc.tank_size
+    if (not rec.location.strip()) and sc.location:
+        rec.location = sc.location
+    if (not rec.contact_person.strip()) and sc.contact_person:
+        rec.contact_person = sc.contact_person
+    if (not rec.phone_number.strip()) and sc.phone_number:
+        rec.phone_number = sc.phone_number
+    if (not rec.sales_person.strip()) and sc.sales_person:
+        rec.sales_person = sc.sales_person
+
+    rec.payment_percent = max(0, min(100, sc.payment_percent if sc.payment_percent or not base else rec.payment_percent))
+    rec.payment_status = _payment_status(rec.payment_percent)
+
+    if sc.list_id.startswith("delivery-"):
+        day_part = sc.list_id.replace("delivery-", "", 1)
+        try:
+            list_day = date.fromisoformat(day_part)
+            rec.delivery_date = _fmt_date(list_day)
+        except Exception:
+            pass
+    if sc.list_id.startswith("installation-"):
+        day_part = sc.list_id.replace("installation-", "", 1)
+        try:
+            list_day = date.fromisoformat(day_part)
+            rec.installation_date = _fmt_date(list_day)
+        except Exception:
+            pass
+
+    if sc.list_id.startswith("delivery-") and sc.is_confirmed:
+        done_on = sc.confirmed_date or today
+        rec.delivery_completion_date = _fmt_date(done_on)
+        if not rec.delivery_status:
+            rec.delivery_status = "Delivery completed"
+
+    if sc.list_id.startswith("installation-") and sc.completed_date:
+        rec.installation_completion_date = _fmt_date(sc.completed_date)
+        if not rec.installation_status:
+            rec.installation_status = "Installation completed"
+
+    if not rec.schedule_type:
+        rec.schedule_type = sc.schedule_type
+    return rec
+
+
+def _build_records_by_schedule(
+    db_records: List[ReportRecord],
+    schedule_cards: List[ScheduleCardSnapshot],
+    today: date,
+) -> Dict[str, List[ReportRecord]]:
+    tomorrow = today + timedelta(days=1)
+    d_tomorrow_key = f"delivery-{tomorrow.isoformat()}"
+    i_tomorrow_key = f"installation-{tomorrow.isoformat()}"
+    d_today_key = f"delivery-{today.isoformat()}"
+    i_today_key = f"installation-{today.isoformat()}"
+
+    by_source = {rec.source_card_id: rec for rec in db_records if rec.source_card_id}
+    by_wo = {rec.work_order_no: rec for rec in db_records if rec.work_order_no}
+
+    def materialize(sc: ScheduleCardSnapshot) -> ReportRecord:
+        base = by_source.get(sc.source_card_id) if sc.source_card_id else None
+        if not base and sc.wo_code:
+            base = by_wo.get(sc.wo_code)
+        return _record_from_schedule_card(base, sc, today)
+
+    buckets: Dict[str, List[ReportRecord]] = {
+        "delivery_pending": [],
+        "delivery_planning": [],
+        "delivery_status": [],
+        "installation_pending": [],
+        "installation_planning": [],
+        "installation_status": [],
+        "payment_status": [],
+    }
+
+    for sc in schedule_cards:
+        lid = sc.list_id
+        if lid == "pending-delivery":
+            buckets["delivery_pending"].append(materialize(sc))
+        elif lid == d_tomorrow_key:
+            buckets["delivery_planning"].append(materialize(sc))
+        elif lid == "pending-installation":
+            buckets["installation_pending"].append(materialize(sc))
+        elif lid == i_tomorrow_key:
+            buckets["installation_planning"].append(materialize(sc))
+
+    buckets["delivery_status"] = (
+        list(buckets["delivery_pending"]) +
+        list(buckets["delivery_planning"]) +
+        [
+            materialize(sc)
+            for sc in schedule_cards
+            if sc.list_id == d_today_key and sc.is_confirmed
+        ]
+    )
+
+    buckets["installation_status"] = (
+        list(buckets["installation_pending"]) +
+        list(buckets["installation_planning"]) +
+        [
+            materialize(sc)
+            for sc in schedule_cards
+            if sc.list_id == i_today_key and sc.completed_date is not None
+        ]
+    )
+
+    # Payment Status:
+    # 1) Installation-completed cards are tracked daily until payment reaches 100%.
+    # 2) Delivery-only cards that are delivered are also tracked daily until 100%.
+    seen_keys = set()
+    for sc in schedule_cards:
+        is_delivery_done = sc.list_id.startswith("delivery-") and sc.is_confirmed
+        is_installation_done = sc.list_id.startswith("installation-") and sc.completed_date is not None
+        if not (is_delivery_done or is_installation_done):
+            continue
+
+        rec = materialize(sc)
+        key = rec.source_card_id or rec.work_order_no
+        if not key:
+            continue
+
+        if rec.requires_installation is True:
+            eligible = is_installation_done
+        elif rec.requires_installation is False:
+            eligible = is_delivery_done
+        else:
+            # Fallback for schedule-only rows without WO metadata.
+            eligible = is_installation_done or is_delivery_done
+
+        if not eligible:
+            continue
+        if rec.payment_percent >= 100:
+            continue
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        buckets["payment_status"].append(rec)
+
+    return buckets
 
 
 def _apply_schedule_overlays(records: List[ReportRecord], overlays: Dict[str, ScheduleOverlay], cards: List[Card]) -> List[ReportRecord]:
@@ -669,12 +953,14 @@ def _serialize_rows(rows: List[ReportRecord], columns: List[str]) -> List[Dict[s
 def get_pending_report_details(db: Session, run_date: Optional[date] = None) -> Dict[str, object]:
     today = run_date or _today_local()
     records = _build_report_records(db)
+    schedule_cards = _load_schedule_cards()
+    buckets = _build_records_by_schedule(records, schedule_cards, today)
 
     delivery_spec = _get_report_spec("delivery_pending")
     installation_spec = _get_report_spec("installation_pending")
 
-    delivery_rows = [rec for rec in records if delivery_spec.include(rec, today)]
-    installation_rows = [rec for rec in records if installation_spec.include(rec, today)]
+    delivery_rows = buckets["delivery_pending"]
+    installation_rows = buckets["installation_pending"]
 
     return {
         "date": today.isoformat(),
@@ -695,6 +981,8 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
     output_dir = Path(os.getenv("REPORT_OUTPUT_DIR", "/app/reports/daily"))
 
     records = _build_report_records(db)
+    schedule_cards = _load_schedule_cards()
+    schedule_buckets = _build_records_by_schedule(records, schedule_cards, today)
 
     outputs: Dict[str, str] = {}
     missing_templates: List[str] = []
@@ -704,7 +992,9 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
         if not template_path.exists():
             missing_templates.append(spec.template_name)
             continue
-        rows = [rec for rec in records if spec.include(rec, today)]
+        rows = schedule_buckets.get(spec.key)
+        if rows is None:
+            rows = [rec for rec in records if spec.include(rec, today)]
         filename = f"{spec.output_name} - {today.strftime('%Y-%m-%d')}.xlsx"
         out_path = output_dir / filename
         saved_path = _write_rows_to_template(template_path, out_path, rows, spec)
