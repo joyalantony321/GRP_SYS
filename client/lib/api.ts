@@ -115,9 +115,19 @@ export interface PendingReportDetailsResponse {
   };
 }
 
+export interface DailyReportGenerateResponse {
+  date: string;
+  reports: Record<string, string>;
+}
+
 export const fetchPendingReportDetails = (forDate?: string): Promise<PendingReportDetailsResponse> => {
   const q = forDate ? `?for_date=${encodeURIComponent(forDate)}` : '';
   return req<PendingReportDetailsResponse>(`/reports/daily/pending-details${q}`);
+};
+
+export const generateDailyReports = (forDate?: string): Promise<DailyReportGenerateResponse> => {
+  const q = forDate ? `?for_date=${encodeURIComponent(forDate)}` : '';
+  return req<DailyReportGenerateResponse>(`/reports/daily/generate${q}`, { method: 'POST' });
 };
 
 // ── User / Auth ───────────────────────────────────────────────────────────

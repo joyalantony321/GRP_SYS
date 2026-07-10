@@ -104,6 +104,8 @@ class ScheduleCardSnapshot:
     phone_number: str
     sales_person: str
     payment_percent: int
+    latest_remark_text: str
+    latest_remark_at: Optional[date]
 
 
 @dataclass(frozen=True)
@@ -332,9 +334,13 @@ def _installation_status(rec: ReportRecord, today: date) -> bool:
 
 
 def _payment_report(rec: ReportRecord, today: date) -> bool:
-    _ = today
-    # Business rule: keep showing in payment sheet every day until fully paid.
-    return rec.payment_percent < 100
+    if rec.payment_percent < 100:
+        return True
+    paid_on = _payment_completed_on(rec)
+    if not paid_on:
+        return False
+    # Keep card on payment sheet for one additional day after it reaches 100%.
+    return today <= (paid_on + timedelta(days=1))
 
 
 def _parse_report_date(value: str) -> Optional[date]:
@@ -510,6 +516,39 @@ def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
         return []
 
     cards: List[ScheduleCardSnapshot] = []
+
+    def latest_schedule_remark(row: Dict[str, Any]) -> tuple[str, Optional[date]]:
+        remarks = row.get("remarks")
+        if not isinstance(remarks, list) or not remarks:
+            return "", None
+
+        best_text = ""
+        best_at: Optional[date] = None
+        best_dt: Optional[datetime] = None
+
+        for item in remarks:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            author = str(item.get("author") or "").strip()
+            at_raw = item.get("at")
+            at_dt: Optional[datetime] = None
+            if at_raw:
+                try:
+                    at_dt = datetime.fromisoformat(str(at_raw).replace("Z", "+00:00"))
+                except Exception:
+                    at_dt = None
+
+            if not text and not author:
+                continue
+
+            if best_dt is None or (at_dt is not None and at_dt > best_dt):
+                best_dt = at_dt
+                best_at = at_dt.date() if at_dt else None
+                best_text = f"{author}: {text}".strip(": ")
+
+        return best_text, best_at
+
     for list_id, rows in raw.items():
         if not isinstance(rows, list):
             continue
@@ -518,6 +557,7 @@ def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
                 continue
             workers_raw = row.get("workers")
             workers = ", ".join([str(w).strip() for w in workers_raw if str(w).strip()]) if isinstance(workers_raw, list) else ""
+            latest_text, latest_at = latest_schedule_remark(row)
             cards.append(
                 ScheduleCardSnapshot(
                     source_card_id=str(row.get("sourceCardId") or "").strip(),
@@ -538,6 +578,8 @@ def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
                     phone_number=str(row.get("phone") or "").strip(),
                     sales_person=str(row.get("salesPerson") or "").strip(),
                     payment_percent=max(0, min(100, _as_int(row.get("paymentPercent"), 0))),
+                    latest_remark_text=latest_text,
+                    latest_remark_at=latest_at,
                 )
             )
     return cards
@@ -604,6 +646,8 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
 
     rec.payment_percent = max(0, min(100, sc.payment_percent if sc.payment_percent or not base else rec.payment_percent))
     rec.payment_status = _payment_status(rec.payment_percent)
+    if sc.latest_remark_text:
+        rec.remarks = sc.latest_remark_text
 
     if sc.list_id.startswith("delivery-"):
         day_part = sc.list_id.replace("delivery-", "", 1)
@@ -681,9 +725,11 @@ def _build_records_by_schedule(
         list(buckets["delivery_pending"]) +
         list(buckets["delivery_planning"]) +
         [
-            materialize(sc)
+            rec
             for sc in schedule_cards
             if sc.list_id == d_today_key and sc.is_confirmed
+            for rec in [materialize(sc)]
+            if rec.requires_installation is not False
         ]
     )
 
@@ -722,7 +768,7 @@ def _build_records_by_schedule(
 
         if not eligible:
             continue
-        if rec.payment_percent >= 100:
+        if not _payment_report(rec, today):
             continue
         if key in seen_keys:
             continue
@@ -1015,7 +1061,7 @@ async def _report_scheduler_loop() -> None:
 
     from database import SessionLocal
 
-    if os.getenv("REPORT_GENERATE_ON_STARTUP", "1") == "1":
+    if os.getenv("REPORT_GENERATE_ON_STARTUP", "0") == "1":
         try:
             with SessionLocal() as db:
                 generate_daily_reports(db, _today_local())
@@ -1038,6 +1084,6 @@ async def _report_scheduler_loop() -> None:
 
 
 def start_daily_report_task() -> Optional[asyncio.Task]:
-    if os.getenv("DAILY_REPORTS_ENABLED", "1") != "1":
+    if os.getenv("DAILY_REPORTS_ENABLED", "0") != "1":
         return None
     return asyncio.create_task(_report_scheduler_loop())

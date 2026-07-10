@@ -11,7 +11,7 @@ import {
   TrendingUp, Clock, ArrowUp,
 } from 'lucide-react';
 import { Card as WorkOrderCard, ChannelType, ScheduleStage } from '@/types';
-import { fetchCards, updateCard, fetchPendingReportDetails, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
+import { fetchCards, updateCard, fetchPendingReportDetails, generateDailyReports, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -289,8 +289,8 @@ const pendDot = (card: ScCard) => (card.returnedFromDate ? '#ef4444' : '');
 /* ─── CardChip – used in BOTH date columns AND pending ───────────────────── */
 
 function CardChip({
-  card, listId, index, isPending, onOpen,
-}: { card: ScCard; listId: string; index: number; isPending?: boolean; onOpen: () => void }) {
+  card, listId, index, isPending, onOpen, isDragDisabled,
+}: { card: ScCard; listId: string; index: number; isPending?: boolean; onOpen: () => void; isDragDisabled?: boolean }) {
   const [tipPos, setTipPos] = useState<{x:number;y:number}|null>(null);
   const woCode = normalizeWoCode(card.woCode);
   const dot = isPending ? pendDot(card) : dateDot(card);
@@ -305,7 +305,7 @@ function CardChip({
   const compact = !isPending;
   const payPct = card.paymentPercent ?? 0;
   return (
-    <Draggable draggableId={card.id} index={index}>
+    <Draggable draggableId={card.id} index={index} isDragDisabled={isDragDisabled}>
       {(prov, snap) => (
         <>
           <div
@@ -548,7 +548,7 @@ function WorkersModal({ destId, onConfirm, onCancel }: { destId:string; onConfir
 
 /* ─── Card Detail Modal ──────────────────────────────────────────────────── */
 
-function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listId:string; onClose:()=>void; onSave:(c:ScCard,lid:string)=>void }) {
+function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate }: { card:ScCard; listId:string; onClose:()=>void; onSave:(c:ScCard,lid:string)=>void; canEdit: boolean; referenceDate: string }) {
   const [ec, setEc] = useState<ScCard>({...card, remarks:[...card.remarks]});
   const [remarkText, setRemarkText] = useState('');
   const [remarkAuthor, setRemarkAuthor] = useState('');
@@ -563,6 +563,11 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
   const dk = isDateList ? listId.replace(/^(delivery|installation)-/, '') : null;
   const isTodayCol = dk ? isToday(parseISO(dk)) : false;
   const stageText = getScheduleStage(ec, listId);
+  const isReadOnly = !canEdit;
+  const currentListPrefix = targetListId.startsWith('installation-') || targetListId === 'pending-installation' ? 'installation' : 'delivery';
+  const targetDateValue = targetListId.startsWith('delivery-') || targetListId.startsWith('installation-')
+    ? targetListId.replace(/^(delivery|installation)-/, '')
+    : referenceDate;
 
   const addWorker = () => {
     const w = workerInput.trim();
@@ -632,8 +637,9 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
           </div>
           <div className="flex items-center gap-2 pl-4 shrink-0">
             <button
+              disabled={isReadOnly}
               onClick={() => setEc(p => ({ ...p, isEmergency: !p.isEmergency }))}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${ec.isEmergency ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'}`}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${ec.isEmergency ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'} ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <AlertTriangle className="w-3.5 h-3.5" />
               {ec.isEmergency ? 'Emergency ON' : 'Emergency'}
@@ -667,6 +673,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               </div>
               <input
                 type="range" min={0} max={100} step={5} value={ec.paymentPercent}
+                disabled={isReadOnly}
                 onChange={e => setEc(p => ({ ...p, paymentPercent: Number(e.target.value) }))}
                 className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
                 style={{ accentColor: pColor(ec.paymentPercent) }}
@@ -685,12 +692,13 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               <div className="flex gap-1.5 mb-2">
                 <input
                   value={workerInput}
+                  disabled={isReadOnly}
                   onChange={e => setWorkerInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addWorker()}
                   placeholder="Add worker"
                   className="flex-1 min-w-0 px-2.5 py-1.5 border border-teal-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
                 />
-                <button onClick={addWorker} className="px-2.5 py-1.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 shrink-0">
+                <button disabled={isReadOnly} onClick={addWorker} className={`px-2.5 py-1.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 shrink-0 ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}>
                   <Plus className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -699,7 +707,9 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                   {ec.workers.map(w => (
                     <span key={w} className="flex items-center gap-1 px-2 py-0.5 bg-white border border-teal-200 rounded-full text-xs text-teal-700">
                       {w}
-                      <button onClick={() => setEc(p => ({ ...p, workers: p.workers.filter(x => x !== w) }))} className="text-teal-400 hover:text-red-500 ml-0.5">×</button>
+                      {!isReadOnly && (
+                        <button onClick={() => setEc(p => ({ ...p, workers: p.workers.filter(x => x !== w) }))} className="text-teal-400 hover:text-red-500 ml-0.5">×</button>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -713,6 +723,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               <label className="block text-xs font-semibold text-amber-700 mb-1.5">Delivery Status</label>
               <input
                 value={ec.deliveryStatus || ''}
+                  disabled={isReadOnly}
                 onChange={e => setEc(p => ({ ...p, deliveryStatus: e.target.value || undefined }))}
                 placeholder="Current delivery status"
                 className="w-full px-2.5 py-1.5 border border-amber-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
@@ -727,6 +738,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                 <label className="block text-xs font-semibold text-indigo-700 mb-1.5">Installation Status</label>
                 <input
                   value={ec.installationStatus || ''}
+                  disabled={isReadOnly}
                   onChange={e => setEc(p => ({ ...p, installationStatus: e.target.value || undefined }))}
                   placeholder="Current installation status"
                   className="w-full px-2.5 py-1.5 border border-indigo-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
@@ -740,8 +752,9 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                   </div>
                 </div>
                 <button
+                  disabled={isReadOnly}
                   onClick={() => setEc(prev => {
-                    const today = dateKey();
+                    const today = referenceDate;
                     if (isCardCurrentlyDelayed(prev)) {
                       const periods = [...(prev.delayPeriods ?? [])];
                       for (let i = periods.length - 1; i >= 0; i -= 1) {
@@ -751,7 +764,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                     }
                     return { ...prev, delayPeriods: [...(prev.delayPeriods ?? []), { startDate: today }] };
                   })}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   {isDelayedNow ? 'Set On Track' : 'Mark Delayed'}
                 </button>
@@ -759,13 +772,71 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
             </div>
           )}
 
+          {canEdit && isDateList && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Scheduled Date</label>
+                <input
+                  type="date"
+                  value={targetDateValue}
+                  min={referenceDate}
+                  onChange={e => {
+                    const next = e.target.value;
+                    if (!next) return;
+                    setTargetListId(`${currentListPrefix}-${next}`);
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+                />
+              </div>
+              {!isDel && (
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Start Date</label>
+                    <input
+                      type="date"
+                      value={ec.confirmedDate || targetDateValue}
+                      onChange={e => setEc(p => ({ ...p, confirmedDate: e.target.value || undefined }))}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">End Date</label>
+                    <input
+                      type="date"
+                      value={ec.completedDate || ''}
+                      min={ec.confirmedDate || targetDateValue}
+                      onChange={e => setEc(p => ({ ...p, completedDate: e.target.value || undefined }))}
+                      className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-400"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {canEdit && isDateList && (
+            <button
+              onClick={() => {
+                const pendingId = isDel ? 'pending-delivery' : 'pending-installation';
+                const moved = { ...ec, isConfirmed: false, completedDate: undefined };
+                setEc(moved);
+                setTargetListId(pendingId);
+                onSave(moved, pendingId);
+                onClose();
+              }}
+              className="w-full py-2 rounded-xl text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Move Back To Pending
+            </button>
+          )}
+
           {/* Action buttons */}
-          {isDateList && isTodayCol && !ec.isConfirmed && (
+          {canEdit && isDateList && isTodayCol && !ec.isConfirmed && (
             isDel ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   onClick={() => {
-                    setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }));
+                    setEc(p => ({ ...p, isConfirmed: true, confirmedDate: referenceDate }));
                     setTargetListId(listId);
                   }}
                   className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700"
@@ -794,7 +865,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               </div>
             ) : (
               <button
-                onClick={() => setEc(p => ({ ...p, isConfirmed: true, confirmedDate: format(new Date(), 'yyyy-MM-dd') }))}
+                onClick={() => setEc(p => ({ ...p, isConfirmed: true, confirmedDate: referenceDate }))}
                 className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700"
               >
                 <CheckCircle className="w-4 h-4" />▶ Start Installation
@@ -807,9 +878,9 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
               <span className="text-sm font-semibold text-green-700">{isDel ? 'Delivered' : 'Started'} on {ec.confirmedDate}</span>
             </div>
           )}
-          {!isDel && ec.isConfirmed && !ec.completedDate && (
+          {canEdit && !isDel && ec.isConfirmed && !ec.completedDate && (
             <button
-              onClick={() => setEc(p => ({ ...p, completedDate: dateKey() }))}
+              onClick={() => setEc(p => ({ ...p, completedDate: referenceDate }))}
               className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700"
             >
               <CheckCircle className="w-4 h-4" /> Mark Installation Completed
@@ -862,6 +933,7 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
             </div>
 
             {/* New remark composer */}
+            {canEdit && (
             <div className="flex items-start gap-2.5">
               <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0 mt-0.5">
                 {remarkAuthor ? remarkAuthor.charAt(0).toUpperCase() : '+'}
@@ -908,20 +980,23 @@ function CardDetailModal({ card, listId, onClose, onSave }: { card:ScCard; listI
                 </div>
               </div>
             </div>
+            )}
           </div>
         </div>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
         <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
           <button onClick={onClose} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
-            Cancel
+            {canEdit ? 'Cancel' : 'Close'}
           </button>
-          <button
-            onClick={() => { onSave(ec, targetListId); onClose(); }}
-            className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors"
-          >
-            Save Changes
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => { onSave(ec, targetListId); onClose(); }}
+              className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors"
+            >
+              Save Changes
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -940,6 +1015,7 @@ const INSTALLATION_COLS = 9;
 
 export default function ScheduleBoard({ userName, userDepartment, userRole, onChannelSwitch, accessibleChannels=[] }: Props) {
   const [store, setStore]           = useState<ScStore>(EMPTY_STORE);
+  const [referenceDate, setReferenceDate] = useState<string>(dateKey());
   const [delOff,  setDelOff]        = useState(-2);
   // Default installation window: 5 past days, today, 3 future days.
   const [instOff, setInstOff]       = useState(-5);
@@ -956,6 +1032,9 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const [pendingDetails, setPendingDetails] = useState<PendingReportDetailsResponse | null>(null);
   const [pendingDetailsLoading, setPendingDetailsLoading] = useState(false);
   const [pendingDetailsError, setPendingDetailsError] = useState('');
+  const [isGeneratingReports, setIsGeneratingReports] = useState(false);
+
+  const canEditSchedule = userRole === 'admin' || userDepartment === 'Delivery & Installation';
 
   const ganttRef   = useRef<HTMLDivElement>(null);
   const delRef     = useRef<HTMLDivElement>(null);
@@ -984,6 +1063,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
   const startDateDrag = useCallback((kind: 'delivery' | 'installation', e: React.MouseEvent) => {
     if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-rfd-draggable-id]')) return;
     e.preventDefault();
     const dragState = { startX: e.clientX, startOff: kind === 'delivery' ? delOff : instOff };
     if (kind === 'delivery') delDragRef.current = dragState;
@@ -1131,7 +1212,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   /* auto-return unconfirmed past cards to pending */
   useEffect(()=>{
     if (!scheduleLoaded) return;
-    const today=startOfDay(new Date());
+    const today=startOfDay(parseISO(referenceDate));
     setStore(prev=>{
       const next:ScStore=JSON.parse(JSON.stringify(prev)); let dirty=false;
       Object.keys(next).forEach(lid=>{
@@ -1150,7 +1231,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         next[lid]=next[lid].filter(c=>c.isConfirmed); dirty=true;
       }); return dirty?next:prev;
     });
-  },[scheduleLoaded]);
+  },[scheduleLoaded, referenceDate]);
 
   // Keep Work Order Schedule cards in sync for Schedule-side changes only.
   useEffect(() => {
@@ -1265,6 +1346,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   },[syncScheduleCardToWorkOrder]);
 
   const onDragEnd=useCallback((result:DropResult)=>{
+    if (!canEditSchedule) return;
     const{destination,source,draggableId}=result;
     if(!destination)return;
     const{droppableId:srcId,index:srcIdx}=source; const{droppableId:dstId,index:dstIdx}=destination;
@@ -1274,12 +1356,12 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const dstDD=dstId.startsWith('delivery-'); const dstID=dstId.startsWith('installation-');
     if((srcDP||srcDD)&&dstID){alert('⛔ Delivery cards can only go to Delivery columns.');return;}
     if((srcIP||srcID)&&dstDD){alert('⛔ Installation cards can only go to Installation columns.');return;}
-    if((srcDP&&dstDD)||(srcIP&&dstID)){
-      const dk=dstId.replace(/^(delivery|installation)-/,'');
-      const today=startOfDay(new Date());
+    if(dstDD||dstID){
+      const dk=dstId.replace(/^(delivery|installation)-/, '');
+      const today=startOfDay(parseISO(referenceDate));
       const dstDay=startOfDay(parseISO(dk));
       if(isBefore(dstDay,today)){
-        alert('⛔ Cannot move pending cards to past dates. Choose today or a future date.');
+        alert('⛔ Cannot place cards on past dates. Choose current date or a future date.');
         return;
       }
     }
@@ -1289,7 +1371,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     }
     if((srcDP&&dstDD)||(srcIP&&dstID)){setPendingDrop({srcId,dstId,cardId:draggableId,dstIdx});return;}
     performMove(srcId,dstId,draggableId,dstIdx);
-  },[performMove]);
+  },[performMove, canEditSchedule, referenceDate]);
 
   const getCards=(lid:string)=>store[lid]??[];
   const woQuery = woSearch.trim().toLowerCase();
@@ -1316,7 +1398,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     setPendingDetailsLoading(true);
     setPendingDetailsError('');
     try {
-      const reportDate = format(new Date(), 'yyyy-MM-dd');
+      const reportDate = referenceDate;
       const payload = await fetchPendingReportDetails(reportDate);
       setPendingDetails(payload);
     } catch (err) {
@@ -1325,12 +1407,29 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     } finally {
       setPendingDetailsLoading(false);
     }
-  }, []);
+  }, [referenceDate]);
 
   const openPendingFullscreen = useCallback(() => {
     setIsPendingFullscreen(true);
     void loadPendingDetails();
   }, [loadPendingDetails]);
+
+  const handleGenerateReports = useCallback(async () => {
+    setIsGeneratingReports(true);
+    try {
+      const payload = await generateDailyReports(referenceDate);
+      const generatedCount = Object.keys(payload.reports ?? {}).filter(k => k !== 'missing_templates').length;
+      const missing = payload.reports?.missing_templates;
+      alert(missing
+        ? `Generated ${generatedCount} report(s). Missing templates: ${missing}`
+        : `Generated ${generatedCount} report(s) for ${payload.date}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate reports';
+      alert(`Report generation failed: ${msg}`);
+    } finally {
+      setIsGeneratingReports(false);
+    }
+  }, [referenceDate]);
 
   const renderPendingDetailsTable = (columns: string[], rows: PendingReportRow[], emptyText: string) => (
     <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-gray-100 bg-white">
@@ -1366,7 +1465,8 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const off=cat==='delivery'?delOff:instOff; const setOff=cat==='delivery'?setDelOff:setInstOff;
     const ref=cat==='delivery'?delRef:instRef; const prefix=cat==='delivery'?'delivery-':'installation-';
     const Icon=cat==='delivery'?Truck:Wrench;
-    const dates=Array.from({length:NUM_COLS},(_,i)=>addDays(new Date(),off+i));
+    const baseDate = parseISO(referenceDate);
+    const dates=Array.from({length:NUM_COLS},(_,i)=>addDays(baseDate,off+i));
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
         {/* header */}
@@ -1410,7 +1510,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                   {(prov,snap)=>(
                     <div ref={prov.innerRef} {...prov.droppableProps}
                       className={`flex-1 overflow-y-auto scrollbar-hide p-1 pb-36 ${snap.isDraggingOver?(isSun?'bg-red-50':'bg-blue-50'):''}`}>
-                      {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
+                      {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} isDragDisabled={!canEditSchedule} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
                       {prov.placeholder}
                       {isSun&&cards.length===0&&<p className="text-xs text-gray-300 text-center mt-2">Sunday – Off</p>}
                     </div>)}
@@ -1427,7 +1527,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
   const renderGantt=()=>{
     type GRow={card:ScCard;dk:string};
-    const today0=startOfDay(new Date());
+    const today0=startOfDay(parseISO(referenceDate));
     const rows:GRow[]=[];
     Object.keys(store).forEach(lid=>{
       if(!lid.startsWith('installation-'))return;
@@ -1442,7 +1542,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     });
     rows.sort((a,b)=>a.dk.localeCompare(b.dk));
     // Left-to-right timeline: today at far left, older past dates to the right.
-    const ganttDates=Array.from({length:GANTT_TOTAL_DAYS},(_,i)=>addDays(new Date(),-i));
+    const ganttDates=Array.from({length:GANTT_TOTAL_DAYS},(_,i)=>addDays(parseISO(referenceDate),-i));
     const LABEL_W=56;
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
@@ -1578,8 +1678,9 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
   const renderCombinedInstallation=()=>{
     const prefix='installation-';
-    const dates=Array.from({length:INSTALLATION_COLS},(_,i)=>addDays(new Date(),instOff+i));
-    const today0 = startOfDay(new Date());
+    const baseDate = parseISO(referenceDate);
+    const dates=Array.from({length:INSTALLATION_COLS},(_,i)=>addDays(baseDate,instOff+i));
+    const today0 = startOfDay(baseDate);
     // Past-day columns are narrower than today/future columns in installation only.
     const dayWeights = dates.map(d => isBefore(startOfDay(d), today0) ? 0.78 : 1);
     const totalWeight = dayWeights.reduce((sum, w) => sum + w, 0);
@@ -1645,7 +1746,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                     {(prov,snap)=>(
                       <div ref={prov.innerRef} {...prov.droppableProps}
                         className={`overflow-y-auto scrollbar-hide p-1 min-h-[36px] ${snap.isDraggingOver?(isSun?'bg-red-50':'bg-blue-50'):''}`}>
-                        {chips.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
+                        {chips.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} isDragDisabled={!canEditSchedule} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
                         {prov.placeholder}
                         {isSun&&chips.length===0&&<p className="text-xs text-gray-300 text-center mt-2">Sunday – Off</p>}
                       </div>)}
@@ -1657,7 +1758,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
           {/* Row 3 – Spanning gantt bars (confirmed/in-progress, absolute positioned) */}
           {(()=>{
-            const todayDk=dateKey();
+            const todayDk=referenceDate;
             const confirmed:Array<{card:ScCard;bDk:string}>=[];
             Object.keys(store).forEach(lid=>{
               if(!lid.startsWith('installation-'))return;
@@ -1820,7 +1921,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                 {(prov,snap)=>(
                   <div ref={prov.innerRef} {...prov.droppableProps}
                     className={`flex-1 overflow-y-auto scrollbar-hide p-1 pb-36 ${snap.isDraggingOver?'bg-orange-50':''}`}>
-                    {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} isPending onOpen={()=>setSelected({card:c,listId:lid})}/>)}
+                    {cards.map((c,i)=><CardChip key={c.id} card={c} listId={lid} index={i} isPending isDragDisabled={!canEditSchedule} onOpen={()=>setSelected({card:c,listId:lid})}/>)}
                     {prov.placeholder}
                     {!cards.length&&<p className="text-xs text-gray-300 text-center py-4 italic">No pending {label.toLowerCase()}</p>}
                   </div>)}
@@ -1844,9 +1945,26 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       <div className="bg-white border-b border-gray-100 px-4 py-2.5 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-lg font-bold text-gray-900">Dashboard</h1>
-          <p className="text-xs text-gray-400 mt-0.5">{format(new Date(),'EEEE, MMMM d, yyyy')}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{format(parseISO(referenceDate),'EEEE, MMMM d, yyyy')}</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 border border-gray-200 rounded-lg bg-white">
+            <span className="text-xs font-semibold text-gray-500">Current Date</span>
+            <input
+              type="date"
+              value={referenceDate}
+              onChange={e => setReferenceDate(e.target.value || dateKey())}
+              className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <button
+            onClick={() => { void handleGenerateReports(); }}
+            disabled={isGeneratingReports || !canEditSchedule}
+            className={`px-3 py-2 rounded-lg text-xs font-semibold border ${isGeneratingReports || !canEditSchedule ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'}`}
+            title={canEditSchedule ? 'Generate all 7 schedule reports' : 'Only Admin and Delivery & Installation can generate reports'}
+          >
+            {isGeneratingReports ? 'Generating...' : 'Generate 7 Reports'}
+          </button>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"/>
             <input value={woSearch} onChange={e=>setWoSearch(e.target.value)} placeholder="Search WO (e.g. 7654)"
@@ -1911,7 +2029,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
       {/* Modals */}
       {addCardType&&<AddCardModal type={addCardType} onClose={()=>setAddCardType(null)} onAdd={c=>setStore(prev=>({...prev,[c.listId]:[...(prev[c.listId]??[]),c]}))}/>}
-      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
+      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} canEdit={canEditSchedule} referenceDate={referenceDate} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
         setStore(prev => {
           const sourceList = selected.listId;
           const next: ScStore = { ...prev };
