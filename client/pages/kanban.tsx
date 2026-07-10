@@ -197,13 +197,7 @@ export default function Kanban() {
       return created;
     } catch (err) {
       console.error('Failed to create card:', err);
-      // Optimistic fallback — return the original card so callers have an id
-      const fallback = { ...card, channel };
-      setCardsByChannel(prev => ({
-        ...prev,
-        [channel]: upsertCardById(prev[channel] ?? [], fallback),
-      }));
-      return fallback;
+      throw err;
     }
   }, [userId]);
 

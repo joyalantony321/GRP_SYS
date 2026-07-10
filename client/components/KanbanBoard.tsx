@@ -502,10 +502,9 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     try {
       const created = await onCreateInChannel(activeChannel, newCard);
       openNewCard(created);
-    } catch {
-      // Fallback: add locally if API is unavailable
-      setCards([...cards, newCard]);
-      openNewCard(newCard);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      alert(`Card creation failed: ${msg}`);
     }
   };
 
@@ -557,8 +556,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     let created: CardType;
     try {
       created = await onCreateInChannel('Work Order', newCard);
-    } catch {
-      return; // onCreateInChannel already updates state on failure
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      alert(`Work Order creation failed: ${msg}`);
+      return;
     }
 
     // Upload documents after card exists in DB
