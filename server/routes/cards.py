@@ -133,6 +133,14 @@ class WorkOrderDetailsIn(BaseModel):
     items: List[dict] = []
 
 
+class TankDetailIn(BaseModel):
+    id: str
+    label: str
+    length: str
+    width: str
+    height: str
+
+
 class CardIn(BaseModel):
     id: Optional[str] = None
     quote_number: Optional[str] = None
@@ -152,6 +160,7 @@ class CardIn(BaseModel):
     assigned_to_username: Optional[str] = None    # resolved → user_id
     user_work_status: Optional[str] = None        # WorkingStatus value
     payment_percent: Optional[int] = 0
+    tank_details: List[TankDetailIn] = []
     schedule_type: Optional[str] = None
     schedule_stage: Optional[str] = None
     completed_at: Optional[str] = None
@@ -381,6 +390,7 @@ def _card_to_dict(card: Card) -> dict:
         "assignedToUsername":   card.assigned_to_name or (card.assigned_user.username if card.assigned_user else None),
         "userWorkStatus":       card.user_work_status.value if card.user_work_status else None,
         "paymentPercent":       card.payment_percent or 0,
+        "tankDetails":          card.tank_details or [],
         "scheduleType":         schedule_type,
         "scheduleStage":        card.schedule_stage,
         "assignmentHistory":    card.assignment_history or [],
@@ -481,6 +491,7 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
         assigned_to_name=card_in.assigned_to_username or None,
         user_work_status=status_val,
         payment_percent=_clamp_payment_percent(card_in.payment_percent),
+        tank_details=[tank.model_dump() for tank in (card_in.tank_details or [])],
         schedule_type=card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else None),
         schedule_stage=card_in.schedule_stage,
         assignment_history=card_in.assignment_history or [],
@@ -574,6 +585,7 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
     card.assigned_to_name        = card_in.assigned_to_username or None
     card.user_work_status        = status_val
     card.payment_percent         = _clamp_payment_percent(card_in.payment_percent)
+    card.tank_details            = [tank.model_dump() for tank in (card_in.tank_details or [])]
     card.schedule_type           = card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else card.schedule_type)
     card.schedule_stage          = card_in.schedule_stage
     card.assignment_history      = card_in.assignment_history if card_in.assignment_history is not None else (card.assignment_history or [])

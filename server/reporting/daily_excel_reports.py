@@ -629,11 +629,11 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
         rec.delivery_status = sc.delivery_status
     if sc.installation_status:
         rec.installation_status = sc.installation_status
-    if (not rec.work_order_no.strip()) and sc.wo_code:
+    if sc.wo_code:
         rec.work_order_no = sc.wo_code
     if (not rec.customer.strip()) and sc.customer:
         rec.customer = sc.customer
-    if (not rec.tank_size.strip()) and sc.tank_size:
+    if sc.tank_size:
         rec.tank_size = sc.tank_size
     if (not rec.location.strip()) and sc.location:
         rec.location = sc.location
@@ -754,7 +754,7 @@ def _build_records_by_schedule(
             continue
 
         rec = materialize(sc)
-        key = rec.source_card_id or rec.work_order_no
+        key = rec.work_order_no or rec.source_card_id
         if not key:
             continue
 

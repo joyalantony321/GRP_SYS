@@ -10,7 +10,7 @@ import {
   ChevronDown, Check, FileText, ClipboardList, Search,
   TrendingUp, Clock, ArrowUp,
 } from 'lucide-react';
-import { Card as WorkOrderCard, ChannelType, ScheduleStage } from '@/types';
+import { Card as WorkOrderCard, ChannelType, ScheduleStage, TankDetail } from '@/types';
 import { fetchCards, updateCard, fetchPendingReportDetails, generateDailyReports, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -38,6 +38,9 @@ interface ScDelayPeriod {
 export interface ScCard {
   id: string; woCode: string; listId: string; workers: string[];
   sourceCardId?: string;
+  tankDetailId?: string;
+  tankLabel?: string;
+  tankGroupLocked?: boolean;
   scheduleType?: 'Delivery' | 'Installation';
   isEmergency: boolean; paymentPercent: number; isConfirmed: boolean;
   confirmedDate?: string; remarks: ScRemark[]; createdAt: string;
@@ -81,11 +84,37 @@ const deriveProductType = (card: WorkOrderCard): string | undefined => {
 };
 
 const deriveTankSize = (card: WorkOrderCard): string | undefined => {
+  if ((card.tankDetails ?? []).length > 0) return undefined;
   const details = card.workOrderDetails;
   if (!details) return undefined;
   const firstItem = details.items?.find(item => item.itemDescription?.trim());
   return firstItem?.itemDescription?.trim() || undefined;
 };
+
+const formatTankDimensions = (tank?: Partial<TankDetail>): string => [tank?.length, tank?.width, tank?.height].filter(Boolean).join('x');
+
+type ScheduleTankSeed = {
+  tankDetailId: string;
+  tankLabel: string;
+  tankSize?: string;
+};
+
+const getScheduleTankSeeds = (card: WorkOrderCard): ScheduleTankSeed[] => {
+  const tankDetails = (card.tankDetails ?? []).filter(tank => tank.length || tank.width || tank.height || tank.label);
+  if (tankDetails.length === 0) {
+    return [{ tankDetailId: 'base', tankLabel: '', tankSize: deriveTankSize(card) }];
+  }
+  return tankDetails.map((tank, index) => ({
+    tankDetailId: tank.id || `tank-${index + 1}`,
+    tankLabel: tank.label || `T${index + 1}`,
+    tankSize: formatTankDimensions(tank),
+  }));
+};
+
+const makeScheduleCardId = (cardId: string, tankDetailId: string) => tankDetailId === 'base' ? `wo-${cardId}` : `wo-${cardId}-${tankDetailId}`;
+
+const makeScheduleWoCode = (baseWoCode: string, tankLabel: string, hasMultipleTanks: boolean) =>
+  hasMultipleTanks && tankLabel ? `${baseWoCode}-${tankLabel}` : baseWoCode;
 
 const deriveContactPerson = (card: WorkOrderCard): string | undefined => {
   const details = card.workOrderDetails;
@@ -166,14 +195,18 @@ const hasExplicitScheduleMetadata = (card: WorkOrderCard): boolean => {
   return stage.includes('delivery') || stage.includes('installation');
 };
 
-const toScheduleCard = (card: WorkOrderCard): ScCard => {
+const toScheduleCards = (card: WorkOrderCard): ScCard[] => {
   const scheduleType = inferScheduleTypeFromWorkOrder(card);
-  const woCode = deriveWoCode(card);
+  const baseWoCode = deriveWoCode(card);
   const details = card.workOrderDetails;
-  return {
-    id: `wo-${card.id}`,
+  const tankSeeds = getScheduleTankSeeds(card);
+  return tankSeeds.map(seed => ({
+    id: makeScheduleCardId(String(card.id), seed.tankDetailId),
     sourceCardId: card.id,
-    woCode,
+    tankDetailId: seed.tankDetailId,
+    tankLabel: seed.tankLabel,
+    tankGroupLocked: tankSeeds.length > 1,
+    woCode: makeScheduleWoCode(baseWoCode, seed.tankLabel, tankSeeds.length > 1),
     scheduleType,
     listId: scheduleType === 'Installation' ? 'pending-installation' : 'pending-delivery',
     workers: [],
@@ -184,13 +217,13 @@ const toScheduleCard = (card: WorkOrderCard): ScCard => {
     createdAt: card.createdAt || new Date().toISOString(),
     customer: card.customerName || card.customerCompanyName || undefined,
     location: card.projectLocation || undefined,
-    tankSize: deriveTankSize(card),
+    tankSize: seed.tankSize || deriveTankSize(card),
     contactPerson: deriveContactPerson(card),
     phone: derivePhoneNumber(card),
     salesPerson: card.salesPerson || undefined,
     brand: normalizeBrand(details?.brand),
     productType: deriveProductType(card),
-  };
+  }));
 };
 
 const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): ScStore => {
@@ -206,50 +239,60 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
   });
 
   relevant.forEach(wo => {
-    const existing = flat.find(sc => String(sc.sourceCardId) === String(wo.id));
     const explicitSchedule = hasExplicitScheduleMetadata(wo);
+    const hasMultipleTankSchedules = (wo.tankDetails?.length ?? 0) > 1;
     const inferredType = inferScheduleTypeFromWorkOrder(wo);
     const targetPending = inferredType === 'Installation' ? 'pending-installation' : 'pending-delivery';
-    if (existing) {
-      // Keep current schedule placement, but always mirror latest WO fields.
-      // Use direct assignment (not OR-fallback) so Schedule stays an exact
-      // reflection of Work Order values, including clear/reset updates.
-      existing.woCode = deriveWoCode(wo);
-      existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : 0;
-      existing.customer = wo.customerName || wo.customerCompanyName || undefined;
-      existing.location = wo.projectLocation || undefined;
-      existing.tankSize = deriveTankSize(wo);
-      existing.contactPerson = deriveContactPerson(wo);
-      existing.phone = derivePhoneNumber(wo);
-      existing.salesPerson = wo.salesPerson || undefined;
-      existing.brand = normalizeBrand(wo.workOrderDetails?.brand);
-      existing.productType = deriveProductType(wo);
-      if (explicitSchedule) {
-        // Work Order has explicit type — enforce it
-        existing.scheduleType = inferredType;
-        if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
-          const fromList = existing.listId;
-          next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
-          const moved = { ...existing, scheduleType: inferredType, listId: targetPending };
-          if (!next[targetPending]) next[targetPending] = [];
-          next[targetPending] = [moved, ...next[targetPending]];
-        }
-      } else {
-        // Work Order has no explicit type — preserve whatever type/list the Schedule card already has
-        // (the user may have set it via the WO pending-choice dialog but the DB hasn't been polled yet)
-      }
-      return;
-    }
+    const freshCards = toScheduleCards(wo);
+    const seedIds = new Set(freshCards.map(card => card.tankDetailId ?? 'base'));
 
-    // For cards parked in Work Order->Schedule without an explicit schedule classification,
-    // do not auto-create a Schedule channel shadow card.
+    Object.keys(next).forEach(listId => {
+      next[listId] = (next[listId] ?? []).filter(sc => {
+        if (String(sc.sourceCardId) !== String(wo.id)) return true;
+        return seedIds.has(sc.tankDetailId ?? 'base');
+      });
+    });
+
     if (wo.list === 'Schedule' && !explicitSchedule) {
       return;
     }
 
-    const fresh = toScheduleCard(wo);
-    if (!next[fresh.listId]) next[fresh.listId] = [];
-    next[fresh.listId] = [fresh, ...next[fresh.listId]];
+    freshCards.forEach((fresh, index) => {
+      const existing = flat.find(sc =>
+        String(sc.sourceCardId) === String(wo.id) &&
+        ((sc.tankDetailId ?? 'base') === (fresh.tankDetailId ?? 'base') || (!sc.tankDetailId && index === 0))
+      );
+
+      if (existing) {
+        existing.woCode = fresh.woCode;
+        existing.tankDetailId = fresh.tankDetailId;
+        existing.tankLabel = fresh.tankLabel;
+        existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : 0;
+        existing.customer = wo.customerName || wo.customerCompanyName || undefined;
+        existing.location = wo.projectLocation || undefined;
+        existing.tankSize = fresh.tankSize;
+        existing.contactPerson = deriveContactPerson(wo);
+        existing.phone = derivePhoneNumber(wo);
+        existing.salesPerson = wo.salesPerson || undefined;
+        existing.brand = normalizeBrand(wo.workOrderDetails?.brand);
+        existing.productType = deriveProductType(wo);
+        existing.tankGroupLocked = existing.tankGroupLocked ?? fresh.tankGroupLocked;
+        if (explicitSchedule && !hasMultipleTankSchedules) {
+          existing.scheduleType = inferredType;
+          if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
+            const fromList = existing.listId;
+            next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
+            const moved = { ...existing, scheduleType: inferredType, listId: targetPending };
+            if (!next[targetPending]) next[targetPending] = [];
+            next[targetPending] = [moved, ...next[targetPending]];
+          }
+        }
+        return;
+      }
+
+      if (!next[fresh.listId]) next[fresh.listId] = [];
+      next[fresh.listId] = [fresh, ...next[fresh.listId]];
+    });
   });
 
   return next;
@@ -266,6 +309,7 @@ const normalizeStore = (raw: unknown): ScStore => {
       normalized[key] = (value as ScCard[]).map(card => ({
         ...card,
         woCode: normalizeWoCode(card.woCode),
+        tankGroupLocked: card.tankGroupLocked ?? true,
       }));
     }
   });
@@ -662,6 +706,31 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
               </div>
             ))}
           </div>
+
+          {(ec.tankLabel || ec.tankSize) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Tank Reference</div>
+                <div className="text-sm font-semibold text-gray-800">{ec.tankLabel ? `${ec.woCode} (${ec.tankLabel})` : ec.woCode}</div>
+                {ec.tankSize && <div className="text-xs text-gray-500 mt-0.5">{ec.tankSize}</div>}
+              </div>
+              {canEdit && ec.sourceCardId && ec.tankDetailId && (
+                <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Tank Stack</div>
+                    <div className="text-sm font-semibold text-gray-800">{ec.tankGroupLocked ? 'Locked together' : 'Unlocked'}</div>
+                    <div className="text-xs text-gray-500">Locked tanks move as one stack.</div>
+                  </div>
+                  <button
+                    onClick={() => setEc(prev => ({ ...prev, tankGroupLocked: !prev.tankGroupLocked }))}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${ec.tankGroupLocked ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}
+                  >
+                    {ec.tankGroupLocked ? 'Unlock' : 'Lock'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Payment + Workers — side by side */}
           <div className="grid grid-cols-2 gap-3">
@@ -1090,10 +1159,35 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       }
     }
     if (!src) return;
+    const hasMultipleTankSchedules = (src.tankDetails?.length ?? 0) > 1;
     const scheduleStage = getScheduleStage(sc, sc.listId);
     const srcStage = src.scheduleStage;
     const srcPayment = typeof src.paymentPercent === 'number' ? src.paymentPercent : 0;
     const nextScheduleType = forcedScheduleType ?? src.scheduleType;
+    if (hasMultipleTankSchedules) {
+      if (srcPayment === sc.paymentPercent) return;
+      const paymentOnlyUpdate: WorkOrderCard = {
+        ...src,
+        paymentPercent: sc.paymentPercent,
+        updatedAt: new Date().toISOString(),
+      };
+      workOrderCardsRef.current = workOrderCardsRef.current.map(c =>
+        String(c.id) === String(paymentOnlyUpdate.id) ? paymentOnlyUpdate : c
+      );
+      setWorkOrderCards(prev => prev.map(c => String(c.id) === String(paymentOnlyUpdate.id) ? paymentOnlyUpdate : c));
+      try {
+        const uid = localStorage.getItem('userId');
+        const saved = await updateCard(paymentOnlyUpdate, uid ? Number(uid) : undefined);
+        setWorkOrderCards(prev => {
+          const next = prev.map(c => String(c.id) === String(saved.id) ? saved : c);
+          workOrderCardsRef.current = next;
+          return next;
+        });
+      } catch {
+        // Keep schedule responsive even when backend update fails temporarily.
+      }
+      return;
+    }
     // Determine whether completedAt needs to be stamped before hitting the
     // stable-guard return.  This covers both new transitions AND pre-existing
     // completed cards (e.g. GRP/1983) that were completed before completedAt
@@ -1336,10 +1430,23 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     setStore(prev=>{
       const next={...prev}; const srcList=[...(next[srcId]??[])]; const card=srcList.find(c=>c.id===cardId);
       if(!card)return prev;
-      next[srcId]=srcList.filter(c=>c.id!==cardId);
-      const moved = {...card,listId:dstId,workers:workers??card.workers};
-      movedForSync = moved;
-      const dstList=[...(next[dstId]??[])]; dstList.splice(dstIdx,0,moved);
+      const groupedCards = card.tankGroupLocked && card.sourceCardId
+        ? Object.values(next).flat().filter(c => String(c.sourceCardId) === String(card.sourceCardId) && c.tankGroupLocked)
+        : [card];
+
+      Object.keys(next).forEach(listId => {
+        next[listId] = (next[listId] ?? []).filter(c => !groupedCards.some(grouped => grouped.id === c.id));
+      });
+
+      const movedCards = groupedCards.map(grouped => ({
+        ...grouped,
+        listId: dstId,
+        workers: workers ?? grouped.workers,
+      }));
+
+      movedForSync = movedCards[0] ?? null;
+      const dstList=[...(next[dstId]??[])];
+      dstList.splice(dstIdx,0,...movedCards);
       next[dstId]=dstList; return next;
     });
     if (movedForSync) void syncScheduleCardToWorkOrder(movedForSync);
@@ -2033,6 +2140,16 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         setStore(prev => {
           const sourceList = selected.listId;
           const next: ScStore = { ...prev };
+          const applyGroupLock = typeof u.tankGroupLocked === 'boolean' && !!u.sourceCardId;
+          if (applyGroupLock) {
+            Object.keys(next).forEach(listKey => {
+              next[listKey] = (next[listKey] ?? []).map(card =>
+                String(card.sourceCardId) === String(u.sourceCardId)
+                  ? { ...card, tankGroupLocked: u.tankGroupLocked }
+                  : card
+              );
+            });
+          }
           next[sourceList] = (next[sourceList] ?? []).filter(c => c.id !== u.id);
           const destination = next[lid] ?? [];
           if (destination.some(c => c.id === u.id)) {

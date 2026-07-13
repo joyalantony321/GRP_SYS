@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Edit2, Save, Trash2, Plus, Check, FileText } from 'lucide-react';
-import { Card, ListType, Remark, RemarkType, Department, ChannelType, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists, WorkOrderFormData, defaultWorkOrderForm } from '@/types';
+import { Card, ListType, Remark, RemarkType, Department, ChannelType, CHANNEL_LISTS, CHANNEL_DEPARTMENTS, getPermittedLists, WorkOrderFormData, TankDetail, defaultWorkOrderForm } from '@/types';
 import WorkOrderFormModal from './WorkOrderFormModal';
 import OrderConfirmationModal from './OrderConfirmationModal';
 import { uploadDocument, deleteDocument, docUrl } from '@/lib/api';
@@ -59,6 +59,42 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
     workOrderDetails: nextForm,
     updatedAt: new Date().toISOString(),
   });
+
+  const addTankDetail = () => {
+    const nextIndex = (editedCard.tankDetails?.length ?? 0) + 1;
+    const nextTank: TankDetail = {
+      id: `tank-${Date.now()}-${nextIndex}`,
+      label: `T${nextIndex}`,
+      length: '',
+      width: '',
+      height: '',
+    };
+    setEditedCard(prev => ({
+      ...prev,
+      tankDetails: [...(prev.tankDetails ?? []), nextTank],
+    }));
+  };
+
+  const updateTankDetail = (tankId: string, field: keyof TankDetail, value: string) => {
+    setEditedCard(prev => ({
+      ...prev,
+      tankDetails: (prev.tankDetails ?? []).map(tank =>
+        tank.id === tankId ? { ...tank, [field]: value } : tank
+      ),
+    }));
+  };
+
+  const removeTankDetail = (tankId: string) => {
+    setEditedCard(prev => {
+      const remaining = (prev.tankDetails ?? []).filter(tank => tank.id !== tankId);
+      return {
+        ...prev,
+        tankDetails: remaining.map((tank, index) => ({ ...tank, label: `T${index + 1}` })),
+      };
+    });
+  };
+
+  const formatTankSize = (tank: TankDetail) => [tank.length, tank.width, tank.height].filter(Boolean).join('x') || '-';
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
   const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
@@ -472,6 +508,97 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                   </div>
                 )}
               </div>
+
+              {channel === 'Work Order' && (
+                <div className="px-4 py-3 bg-white border-b border-gray-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Tank Sizes</p>
+                    {isEditing && (
+                      <button
+                        type="button"
+                        onClick={addTankDetail}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-purple-200 text-purple-600 hover:bg-purple-50"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Tank
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      {(editedCard.tankDetails ?? []).map((tank, index) => (
+                        <div key={tank.id} className="grid grid-cols-[72px_1fr_1fr_1fr_36px] gap-2 items-end">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Label</label>
+                            <input
+                              type="text"
+                              value={tank.label}
+                              onChange={(e) => updateTankDetail(tank.id, 'label', e.target.value || `T${index + 1}`)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder={`T${index + 1}`}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">L</label>
+                            <input
+                              type="text"
+                              value={tank.length}
+                              onChange={(e) => updateTankDetail(tank.id, 'length', e.target.value)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="4 or 4(2+2)"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">B</label>
+                            <input
+                              type="text"
+                              value={tank.width}
+                              onChange={(e) => updateTankDetail(tank.id, 'width', e.target.value)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="2 or 1.5"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">H</label>
+                            <input
+                              type="text"
+                              value={tank.height}
+                              onChange={(e) => updateTankDetail(tank.id, 'height', e.target.value)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="3 or 3(1+2)"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeTankDetail(tank.id)}
+                            className="h-10 w-9 inline-flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200"
+                            title="Remove tank"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      {(editedCard.tankDetails ?? []).length === 0 && (
+                        <p className="text-xs text-gray-400 italic">No tank sizes added yet. Add one row per tank. Partition format examples: 4(2+2), 4(1+3), 4.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {(card.tankDetails ?? []).length > 0 ? (card.tankDetails ?? []).map(tank => (
+                        <div key={tank.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{tank.label}</p>
+                            <p className="text-sm font-medium text-gray-800">{formatTankSize(tank)}</p>
+                          </div>
+                        </div>
+                      )) : (
+                        <p className="text-sm text-gray-500">No tank sizes added.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Subject & Project Location ── */}
               <div className="px-4 py-3 bg-white border-b border-gray-100 space-y-2">

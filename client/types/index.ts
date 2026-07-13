@@ -133,10 +133,19 @@ export interface Card {
   assignedTo?: string;
   userWorkStatus?: UserWorkStatus;
   paymentPercent?: number;
+  tankDetails?: TankDetail[];
   listHistory?: { list: ListType; enteredAt: string }[];
   assignmentHistory?: { assignedTo: string; assignedAt: string; assignedBy?: string; action?: 'Sent' | 'Approved' | 'Terminated' | 'Revised' | 'Redo' }[];
   workOrderDetails?: WorkOrderFormData;
   orderConfirmationDetails?: OrderConfirmationFormData;
+}
+
+export interface TankDetail {
+  id: string;
+  label: string;
+  length: string;
+  width: string;
+  height: string;
 }
 
 export interface WorkOrderItem {

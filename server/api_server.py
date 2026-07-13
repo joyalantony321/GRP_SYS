@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255)",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS customer_company_name VARCHAR(255)",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS payment_percent INTEGER DEFAULT 0",
+        "ALTER TABLE cards ADD COLUMN IF NOT EXISTS tank_details JSONB DEFAULT '[]'::jsonb",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(20)",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS schedule_stage VARCHAR(40)",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS assignment_history JSONB",
