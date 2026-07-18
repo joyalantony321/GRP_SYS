@@ -42,6 +42,16 @@ HEADER_ALIASES: Dict[str, List[str]] = {
     "PDC Cheque": ["PDC CHEQUE", "P.D.C. CHEUQE", "P.D.C. CHEQUE", "PDC CHECK"],
 }
 
+ACTIVE_SCHEDULE_LISTS = {
+    "pending-delivery",
+    "status-delivery",
+    "planning-delivery",
+    "pending-installation",
+    "status-installation",
+    "planning-installation",
+}
+ARCHIVE_LIST_ID = "archive-completed"
+
 
 @dataclass
 class ReportRecord:
@@ -89,14 +99,23 @@ class ScheduleCardSnapshot:
     source_card_id: str
     wo_code: str
     list_id: str
+    phase: str
     schedule_type: str
     is_confirmed: bool
     confirmed_date: Optional[date]
     completed_date: Optional[date]
+    created_date: Optional[date]
+    returned_from_date: Optional[date]
     workers: str
     brand: str
+    product_type: str
+    tank_type: str
+    delivery_date: str
+    installation_date: str
     delivery_status: str
     installation_status: str
+    delivery_status_text: str
+    installation_status_text: str
     customer: str
     tank_size: str
     location: str
@@ -112,7 +131,7 @@ class ScheduleCardSnapshot:
 class ReportSpec:
     key: str
     template_name: str
-    output_name: str
+    output_stem: str
     columns: List[str]
     include: Callable[[ReportRecord, date], bool]
 
@@ -502,19 +521,107 @@ def _as_int(value: Any, fallback: int = 0) -> int:
         return fallback
 
 
-def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
-    path = Path(os.getenv("REPORT_SCHEDULE_DATA_FILE", "/app/client_data/schedule-data.json"))
-    if not path.exists():
-        return []
+def _schedule_data_file() -> Path:
+    return Path(os.getenv("REPORT_SCHEDULE_DATA_FILE", "/app/client_data/schedule-data.json"))
 
+
+def _load_schedule_store_raw() -> Dict[str, Any]:
+    path = _schedule_data_file()
+    if not path.exists():
+        return {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return []
-
+        return {}
     if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def _schedule_card_phase(row: Dict[str, Any], list_id: str) -> str:
+    phase = str(row.get("phase") or "").strip().lower()
+    if phase in {"delivery", "installation"}:
+        return phase
+    if "installation" in list_id:
+        return "installation"
+    return "delivery"
+
+
+def _schedule_card_identity(row: Dict[str, Any], list_id: str) -> str:
+    src = str(row.get("sourceCardId") or row.get("id") or "").strip()
+    phase = _schedule_card_phase(row, list_id)
+    return f"{src}:{phase}"
+
+
+def _card_existed_by_day(row: Dict[str, Any], day: date) -> bool:
+    created = _parse_iso_date(row.get("createdAt"))
+    if created is not None and created > day:
+        return False
+    returned = _parse_iso_date(row.get("returnedFromDate"))
+    if returned is not None and returned > day:
+        return False
+    return True
+
+
+def _card_completion_for_history(row: Dict[str, Any]) -> Optional[date]:
+    for key in ("completedDate", "confirmedDate", "updatedAt"):
+        parsed = _parse_iso_date(row.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _build_historical_schedule_store(base: Dict[str, Any], search_day: date) -> Dict[str, List[Dict[str, Any]]]:
+    next_store: Dict[str, List[Dict[str, Any]]] = {list_id: [] for list_id in ACTIVE_SCHEDULE_LISTS}
+    active_by_identity: Dict[str, tuple[str, Dict[str, Any]]] = {}
+
+    for list_id, cards in base.items():
+        if list_id == ARCHIVE_LIST_ID or not isinstance(cards, list):
+            continue
+        for row in cards:
+            if not isinstance(row, dict):
+                continue
+            identity = _schedule_card_identity(row, list_id)
+            row_copy = dict(row)
+            row_copy["listId"] = str(row.get("listId") or list_id)
+            active_by_identity[identity] = (list_id, row_copy)
+
+    seen = set()
+    for row in base.get(ARCHIVE_LIST_ID, []):
+        if not isinstance(row, dict):
+            continue
+        if not _card_existed_by_day(row, search_day):
+            continue
+        identity = _schedule_card_identity(row, ARCHIVE_LIST_ID)
+        seen.add(identity)
+        completed = _card_completion_for_history(row)
+        if completed and completed <= search_day:
+            continue
+
+        phase = _schedule_card_phase(row, ARCHIVE_LIST_ID)
+        status_list = "status-installation" if phase == "installation" else "status-delivery"
+        row_copy = dict(row)
+        row_copy["listId"] = status_list
+        next_store[status_list].append(row_copy)
+
+    for identity, (list_id, row) in active_by_identity.items():
+        if identity in seen:
+            continue
+        if not _card_existed_by_day(row, search_day):
+            continue
+        target = str(row.get("listId") or list_id)
+        if target in ACTIVE_SCHEDULE_LISTS:
+            next_store[target].append(row)
+
+    return next_store
+
+
+def _load_schedule_cards(run_day: date) -> List[ScheduleCardSnapshot]:
+    raw = _load_schedule_store_raw()
+    if not raw:
         return []
 
+    historical = _build_historical_schedule_store(raw, run_day)
     cards: List[ScheduleCardSnapshot] = []
 
     def latest_schedule_remark(row: Dict[str, Any]) -> tuple[str, Optional[date]]:
@@ -538,39 +645,105 @@ def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
                     at_dt = datetime.fromisoformat(str(at_raw).replace("Z", "+00:00"))
                 except Exception:
                     at_dt = None
-
             if not text and not author:
                 continue
-
             if best_dt is None or (at_dt is not None and at_dt > best_dt):
                 best_dt = at_dt
                 best_at = at_dt.date() if at_dt else None
                 best_text = f"{author}: {text}".strip(": ")
-
         return best_text, best_at
 
-    for list_id, rows in raw.items():
+    def tank_type_from_tanks(tanks: List[Dict[str, Any]]) -> str:
+        kinds = []
+        for tank in tanks:
+            t = str(tank.get("tankType") or "").strip().upper()
+            if t and t not in kinds:
+                kinds.append(t)
+        return " / ".join(kinds)
+
+    def first_tank_date(tanks: List[Dict[str, Any]], status_key: str) -> str:
+        for tank in tanks:
+            parsed = _parse_iso_date(tank.get("completionDate"))
+            if parsed:
+                return _fmt_date(parsed)
+        return ""
+
+    def aggregate_status(row: Dict[str, Any], tanks: List[Dict[str, Any]], phase: str) -> str:
+        key = "deliveryStatus" if phase == "delivery" else "installationStatus"
+        direct = str(row.get(key) or "").strip()
+        if direct:
+            return direct
+        values = [str(t.get(key) or "").strip() for t in tanks if str(t.get(key) or "").strip()]
+        if not values:
+            return ""
+        if phase == "delivery":
+            if all(v == "Completed" for v in values):
+                return "Completed"
+            if any(v in {"Partially Delivered", "Completed"} for v in values):
+                return "Partially Delivered"
+            return "Not Delivered"
+        if all(v == "Completed" for v in values):
+            return "Completed"
+        if any(v in {"Partially Installed", "Completed"} for v in values):
+            return "Partially Installed"
+        return "Not Started"
+
+    def aggregate_status_text(row: Dict[str, Any], tanks: List[Dict[str, Any]], phase: str) -> str:
+        key = "deliveryStatusText" if phase == "delivery" else "installationStatusText"
+        direct = str(row.get(key) or "").strip()
+        if direct:
+            return direct
+        for tank in tanks:
+            value = str(tank.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    for list_id, rows in historical.items():
         if not isinstance(rows, list):
             continue
         for row in rows:
             if not isinstance(row, dict):
                 continue
+
+            tanks_raw = row.get("tanks")
+            tanks = [t for t in tanks_raw if isinstance(t, dict)] if isinstance(tanks_raw, list) else []
             workers_raw = row.get("workers")
             workers = ", ".join([str(w).strip() for w in workers_raw if str(w).strip()]) if isinstance(workers_raw, list) else ""
             latest_text, latest_at = latest_schedule_remark(row)
+            phase = _schedule_card_phase(row, list_id)
+
+            section_remarks = str(row.get("sectionRemarks") or "").strip()
+            tank_remarks = "; ".join(
+                [
+                    f"{str(t.get('label') or '').strip()}: {str(t.get('remarks') or '').strip()}".strip(": ")
+                    for t in tanks
+                    if str(t.get("remarks") or "").strip()
+                ]
+            )
+
             cards.append(
                 ScheduleCardSnapshot(
                     source_card_id=str(row.get("sourceCardId") or "").strip(),
                     wo_code=str(row.get("woCode") or "").strip(),
                     list_id=str(row.get("listId") or list_id or "").strip(),
-                    schedule_type=str(row.get("scheduleType") or "").strip() or ("Installation" if str(list_id).startswith("installation-") else "Delivery"),
+                    phase=phase,
+                    schedule_type=str(row.get("scheduleType") or "").strip() or ("Installation" if phase == "installation" else "Delivery"),
                     is_confirmed=bool(row.get("isConfirmed")),
                     confirmed_date=_parse_iso_date(row.get("confirmedDate")),
                     completed_date=_parse_iso_date(row.get("completedDate")),
+                    created_date=_parse_iso_date(row.get("createdAt")),
+                    returned_from_date=_parse_iso_date(row.get("returnedFromDate")),
                     workers=workers,
                     brand=_normalize_overlay_brand(str(row.get("brand") or "")),
-                    delivery_status=str(row.get("deliveryStatus") or "").strip(),
-                    installation_status=str(row.get("installationStatus") or "").strip(),
+                    product_type=str(row.get("productType") or "").strip(),
+                    tank_type=tank_type_from_tanks(tanks),
+                    delivery_date=first_tank_date(tanks, "deliveryStatus"),
+                    installation_date=first_tank_date(tanks, "installationStatus"),
+                    delivery_status=aggregate_status(row, tanks, "delivery"),
+                    installation_status=aggregate_status(row, tanks, "installation"),
+                    delivery_status_text=aggregate_status_text(row, tanks, "delivery"),
+                    installation_status_text=aggregate_status_text(row, tanks, "installation"),
                     customer=str(row.get("customer") or "").strip(),
                     tank_size=str(row.get("tankSize") or "").strip(),
                     location=str(row.get("location") or "").strip(),
@@ -578,7 +751,7 @@ def _load_schedule_cards() -> List[ScheduleCardSnapshot]:
                     phone_number=str(row.get("phone") or "").strip(),
                     sales_person=str(row.get("salesPerson") or "").strip(),
                     payment_percent=max(0, min(100, _as_int(row.get("paymentPercent"), 0))),
-                    latest_remark_text=latest_text,
+                    latest_remark_text=section_remarks or latest_text or tank_remarks,
                     latest_remark_at=latest_at,
                 )
             )
@@ -625,16 +798,22 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
         rec.workers = sc.workers
     if (not rec.brand.strip()) and sc.brand:
         rec.brand = sc.brand
-    if sc.delivery_status:
-        rec.delivery_status = sc.delivery_status
-    if sc.installation_status:
-        rec.installation_status = sc.installation_status
+    # Delivery/Installation status should follow the explicit text fields when
+    # present, with dropdown state as fallback.
+    if sc.delivery_status_text or sc.delivery_status:
+        rec.delivery_status = sc.delivery_status_text or sc.delivery_status
+    if sc.installation_status_text or sc.installation_status:
+        rec.installation_status = sc.installation_status_text or sc.installation_status
     if sc.wo_code:
         rec.work_order_no = sc.wo_code
     if (not rec.customer.strip()) and sc.customer:
         rec.customer = sc.customer
     if sc.tank_size:
         rec.tank_size = sc.tank_size
+    if sc.product_type:
+        rec.tank_type = sc.product_type
+    elif sc.tank_type and not rec.tank_type:
+        rec.tank_type = sc.tank_type
     if (not rec.location.strip()) and sc.location:
         rec.location = sc.location
     if (not rec.contact_person.strip()) and sc.contact_person:
@@ -649,28 +828,22 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
     if sc.latest_remark_text:
         rec.remarks = sc.latest_remark_text
 
-    if sc.list_id.startswith("delivery-"):
-        day_part = sc.list_id.replace("delivery-", "", 1)
-        try:
-            list_day = date.fromisoformat(day_part)
-            rec.delivery_date = _fmt_date(list_day)
-        except Exception:
-            pass
-    if sc.list_id.startswith("installation-"):
-        day_part = sc.list_id.replace("installation-", "", 1)
-        try:
-            list_day = date.fromisoformat(day_part)
-            rec.installation_date = _fmt_date(list_day)
-        except Exception:
-            pass
+    if sc.delivery_date:
+        rec.delivery_date = sc.delivery_date
+    elif not rec.delivery_date:
+        rec.delivery_date = _fmt_date(sc.returned_from_date or sc.confirmed_date or sc.created_date or today)
+    if sc.installation_date:
+        rec.installation_date = sc.installation_date
+    elif not rec.installation_date:
+        rec.installation_date = _fmt_date(sc.returned_from_date or sc.confirmed_date or sc.created_date or today)
 
-    if sc.list_id.startswith("delivery-") and sc.is_confirmed:
-        done_on = sc.confirmed_date or today
+    if sc.phase == "delivery" and sc.is_confirmed:
+        done_on = sc.confirmed_date or sc.returned_from_date or today
         rec.delivery_completion_date = _fmt_date(done_on)
         if not rec.delivery_status:
             rec.delivery_status = "Delivery completed"
 
-    if sc.list_id.startswith("installation-") and sc.completed_date:
+    if sc.phase == "installation" and sc.completed_date:
         rec.installation_completion_date = _fmt_date(sc.completed_date)
         if not rec.installation_status:
             rec.installation_status = "Installation completed"
@@ -685,12 +858,6 @@ def _build_records_by_schedule(
     schedule_cards: List[ScheduleCardSnapshot],
     today: date,
 ) -> Dict[str, List[ReportRecord]]:
-    tomorrow = today + timedelta(days=1)
-    d_tomorrow_key = f"delivery-{tomorrow.isoformat()}"
-    i_tomorrow_key = f"installation-{tomorrow.isoformat()}"
-    d_today_key = f"delivery-{today.isoformat()}"
-    i_today_key = f"installation-{today.isoformat()}"
-
     by_source = {rec.source_card_id: rec for rec in db_records if rec.source_card_id}
     by_wo = {rec.work_order_no: rec for rec in db_records if rec.work_order_no}
 
@@ -714,59 +881,23 @@ def _build_records_by_schedule(
         lid = sc.list_id
         if lid == "pending-delivery":
             buckets["delivery_pending"].append(materialize(sc))
-        elif lid == d_tomorrow_key:
+        elif lid == "planning-delivery":
             buckets["delivery_planning"].append(materialize(sc))
+        elif lid == "status-delivery":
+            buckets["delivery_status"].append(materialize(sc))
         elif lid == "pending-installation":
             buckets["installation_pending"].append(materialize(sc))
-        elif lid == i_tomorrow_key:
+        elif lid == "planning-installation":
             buckets["installation_planning"].append(materialize(sc))
+        elif lid == "status-installation":
+            buckets["installation_status"].append(materialize(sc))
 
-    buckets["delivery_status"] = (
-        list(buckets["delivery_pending"]) +
-        list(buckets["delivery_planning"]) +
-        [
-            rec
-            for sc in schedule_cards
-            if sc.list_id == d_today_key and sc.is_confirmed
-            for rec in [materialize(sc)]
-            if rec.requires_installation is not False
-        ]
-    )
-
-    buckets["installation_status"] = (
-        list(buckets["installation_pending"]) +
-        list(buckets["installation_planning"]) +
-        [
-            materialize(sc)
-            for sc in schedule_cards
-            if sc.list_id == i_today_key and sc.completed_date is not None
-        ]
-    )
-
-    # Payment Status:
-    # 1) Installation-completed cards are tracked daily until payment reaches 100%.
-    # 2) Delivery-only cards that are delivered are also tracked daily until 100%.
+    # Payment report should also reflect only the selected-day schedule snapshot.
     seen_keys = set()
     for sc in schedule_cards:
-        is_delivery_done = sc.list_id.startswith("delivery-") and sc.is_confirmed
-        is_installation_done = sc.list_id.startswith("installation-") and sc.completed_date is not None
-        if not (is_delivery_done or is_installation_done):
-            continue
-
         rec = materialize(sc)
         key = rec.work_order_no or rec.source_card_id
         if not key:
-            continue
-
-        if rec.requires_installation is True:
-            eligible = is_installation_done
-        elif rec.requires_installation is False:
-            eligible = is_delivery_done
-        else:
-            # Fallback for schedule-only rows without WO metadata.
-            eligible = is_installation_done or is_delivery_done
-
-        if not eligible:
             continue
         if not _payment_report(rec, today):
             continue
@@ -885,7 +1016,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="delivery_planning",
         template_name="Delivery Planning.xlsx",
-        output_name="Delivery Planning",
+        output_stem="Planning_Delivery",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type (INS / NON)", "Location",
             "Delivery Date", "Delivery Status", "Delivery Completion Date", "Contact Person",
@@ -896,7 +1027,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="delivery_pending",
         template_name="Delivery Pending.xlsx",
-        output_name="Delivery Pending",
+        output_stem="Pending_Delivery",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Delivery Date",
             "Delivery Status", "Delivery Completion Date", "Contact Person", "Phone Number", "Sales Person", "Remarks",
@@ -906,7 +1037,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="delivery_status",
         template_name="Delivery Status.xlsx",
-        output_name="Delivery Status",
+        output_stem="Status_Delivery",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Delivery Date",
             "Delivery Status", "Delivery Completion Date", "Contact Person", "Phone Number", "Sales Person", "Remarks",
@@ -916,7 +1047,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="installation_planning",
         template_name="Installation Planning.xlsx",
-        output_name="Installation Planning",
+        output_stem="Planning_Installation",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
             "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
@@ -927,7 +1058,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="installation_pending",
         template_name="Installation Pending.xlsx",
-        output_name="Installation Pending",
+        output_stem="Pending_Installation",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
             "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
@@ -938,7 +1069,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="installation_status",
         template_name="Installation Status.xlsx",
-        output_name="Installation Status",
+        output_stem="Status_Installation",
         columns=[
             "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
             "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
@@ -949,7 +1080,7 @@ REPORT_SPECS: List[ReportSpec] = [
     ReportSpec(
         key="payment_status",
         template_name="Payment Status.xlsx",
-        output_name="Payment Status",
+        output_stem="Payment_Status",
         columns=[
             "Work Order No.", "Customer", "Delivery Date", "Installation Date", "Payment Status", "PDC Cheque",
             "Sales Person", "Remarks",
@@ -981,8 +1112,7 @@ def _query_work_order_cards(db: Session) -> List[Card]:
 
 def _build_report_records(db: Session) -> List[ReportRecord]:
     cards = _query_work_order_cards(db)
-    records = [_to_record(card) for card in cards]
-    return _apply_schedule_overlays(records, _load_schedule_overlays(), cards)
+    return [_to_record(card) for card in cards]
 
 
 def _get_report_spec(spec_key: str) -> ReportSpec:
@@ -999,7 +1129,7 @@ def _serialize_rows(rows: List[ReportRecord], columns: List[str]) -> List[Dict[s
 def get_pending_report_details(db: Session, run_date: Optional[date] = None) -> Dict[str, object]:
     today = run_date or _today_local()
     records = _build_report_records(db)
-    schedule_cards = _load_schedule_cards()
+    schedule_cards = _load_schedule_cards(today)
     buckets = _build_records_by_schedule(records, schedule_cards, today)
 
     delivery_spec = _get_report_spec("delivery_pending")
@@ -1027,7 +1157,7 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
     output_dir = Path(os.getenv("REPORT_OUTPUT_DIR", "/app/reports/daily"))
 
     records = _build_report_records(db)
-    schedule_cards = _load_schedule_cards()
+    schedule_cards = _load_schedule_cards(today)
     schedule_buckets = _build_records_by_schedule(records, schedule_cards, today)
 
     outputs: Dict[str, str] = {}
@@ -1041,7 +1171,12 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
         rows = schedule_buckets.get(spec.key)
         if rows is None:
             rows = [rec for rec in records if spec.include(rec, today)]
-        filename = f"{spec.output_name} - {today.strftime('%Y-%m-%d')}.xlsx"
+        if spec.key == "delivery_pending":
+            rows = [
+                ReportRecord(**{**rec.__dict__, "delivery_completion_date": ""})
+                for rec in rows
+            ]
+        filename = f"{spec.output_stem}_{today.strftime('%Y-%m-%d')}.xlsx"
         out_path = output_dir / filename
         saved_path = _write_rows_to_template(template_path, out_path, rows, spec)
         outputs[spec.key] = str(saved_path)

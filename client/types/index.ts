@@ -1,6 +1,6 @@
 export type RemarkType = 'Active' | 'Pending' | 'Inactive';
 
-export type ScheduleType = 'Delivery' | 'Installation';
+export type ScheduleType = 'Delivery' | 'Installation' | 'Delivery & Installation';
 
 export type ScheduleStage =
   | 'Pending delivery'
@@ -146,6 +146,9 @@ export interface TankDetail {
   length: string;
   width: string;
   height: string;
+  itemDescription: string;
+  tankType: '' | 'INS' | 'NON-INS';
+  remarks: string;
 }
 
 export interface WorkOrderItem {

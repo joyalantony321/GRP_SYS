@@ -121,7 +121,7 @@ class Card(Base):
     user_work_status        = Column(Enum(WorkingStatus), nullable=True)
     payment_percent         = Column(Integer, nullable=False, default=0)
     tank_details            = Column(JSON, nullable=True, default=list)
-    schedule_type           = Column(String(20), nullable=True)
+    schedule_type           = Column(String(40), nullable=True)
     schedule_stage          = Column(String(40), nullable=True)
     completed_at            = Column(DateTime(timezone=True), nullable=True)
     assignment_history      = Column(JSON, nullable=True, default=list)

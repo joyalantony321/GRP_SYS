@@ -214,12 +214,17 @@ export default function KanbanCard({ card, index, onClick, onDelete, onApprove, 
 
   const latestListRemark = getLatestListRemark();
   const latestPreviewRemark = getLatestRemarkOverall(card.remarks);
-  const assignmentTrail = (card.assignmentHistory ?? []).filter((entry, idx, arr) => {
+  // Defensive: assignmentHistory may contain null/undefined entries from older data
+  const cleanedHistory = (card.assignmentHistory ?? []).filter((h): h is { assignedTo: string; assignedAt: string; assignedBy?: string; action?: 'Sent' | 'Approved' | 'Terminated' | 'Revised' | 'Redo' } => !!h);
+  const assignmentTrail = cleanedHistory.filter((entry, idx, arr) => {
+    if (!entry) return false;
     if (idx === 0) return true;
     const prev = arr[idx - 1];
-    return !(prev.assignedTo === entry.assignedTo && prev.assignedBy === entry.assignedBy && prev.assignedAt === entry.assignedAt);
+    if (!prev) return true;
+    return !(prev.assignedTo === entry.assignedTo && (prev.assignedBy ?? prev.assignedTo) === (entry.assignedBy ?? entry.assignedTo) && prev.assignedAt === entry.assignedAt);
   });
-  const lastSentBy = assignmentTrail.length > 0 ? (assignmentTrail[assignmentTrail.length - 1].assignedBy || assignmentTrail[assignmentTrail.length - 1].assignedTo) : undefined;
+  const lastEntry = assignmentTrail.length > 0 ? assignmentTrail[assignmentTrail.length - 1] : undefined;
+  const lastSentBy = lastEntry ? (lastEntry.assignedBy ?? lastEntry.assignedTo) : undefined;
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Toggle expansion state for both admin and user

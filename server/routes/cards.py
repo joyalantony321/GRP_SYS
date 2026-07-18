@@ -6,7 +6,7 @@ Uses integer FK model: list_id, channel_id, assigned_to (user_id).
 from __future__ import annotations
 import json
 from datetime import date as date_type, datetime, timezone
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -139,6 +139,9 @@ class TankDetailIn(BaseModel):
     length: str
     width: str
     height: str
+    itemDescription: Optional[str] = None
+    tankType: Optional[Literal["INS", "NON-INS", ""]] = None
+    remarks: Optional[str] = None
 
 
 class CardIn(BaseModel):

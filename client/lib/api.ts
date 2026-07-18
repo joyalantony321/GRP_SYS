@@ -11,6 +11,21 @@ const FALLBACK_BASES = ['http://localhost:8001', 'http://localhost:8000'];
 /** Module-level departments cache, populated by getAppData(). */
 let _depsCache: ApiDepartment[] = [];
 
+function normalizeScheduleTypeFromApi(raw: unknown): Card['scheduleType'] | undefined {
+  if (raw === 'Delivery' || raw === 'Installation' || raw === 'Delivery & Installation') {
+    return raw;
+  }
+  if (raw === 'Delivery+Installation' || raw === 'D&I') {
+    return 'Delivery & Installation';
+  }
+  return undefined;
+}
+
+function encodeScheduleTypeForApi(scheduleType: Card['scheduleType'] | undefined): string | null {
+  if (!scheduleType) return null;
+  return scheduleType;
+}
+
 function depIdsToNames(ids: number[] | null | undefined): string[] | undefined {
   if (!ids || ids.length === 0) return undefined;
   const names = ids.map(id => _depsCache.find(d => d.depId === id)?.depName).filter(Boolean) as string[];
@@ -174,7 +189,7 @@ export function mapCard(c: Record<string, unknown>): Card {
     ? rawHistory as { assignedTo: string; assignedAt: string; assignedBy?: string }[]
     : [];
   const rawList = ((c.listName as string) ?? (c.list as string) ?? 'Quotation');
-  const rawScheduleType = c.scheduleType as Card['scheduleType'] | undefined;
+  const rawScheduleType = normalizeScheduleTypeFromApi(c.scheduleType);
   const legacyScheduleType = rawList === 'Delivery' || rawList === 'Installation'
     ? (rawList as Card['scheduleType'])
     : undefined;
@@ -206,6 +221,9 @@ export function mapCard(c: Record<string, unknown>): Card {
       length: (tank.length as string) ?? '',
       width: (tank.width as string) ?? '',
       height: (tank.height as string) ?? '',
+      itemDescription: ((tank.itemDescription as string) ?? (tank.item_description as string) ?? ''),
+      tankType: ((tank.tankType as '' | 'INS' | 'NON-INS') ?? (tank.tank_type as '' | 'INS' | 'NON-INS') ?? ''),
+      remarks: (tank.remarks as string) ?? '',
     })),
     completedAt:           (c.completedAt as string) ?? undefined,
     assignmentHistory,
@@ -352,8 +370,11 @@ function toCardIn(card: Card, performedBy?: number) {
       length: tank.length,
       width: tank.width,
       height: tank.height,
+      itemDescription: tank.itemDescription,
+      tankType: tank.tankType,
+      remarks: tank.remarks,
     })),
-    schedule_type:          card.scheduleType ?? null,
+    schedule_type:          encodeScheduleTypeForApi(card.scheduleType),
     schedule_stage:         card.scheduleStage ?? null,
     assignment_history:     card.assignmentHistory ?? [],
     completed_at:           card.completedAt ?? null,

@@ -68,6 +68,9 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
       length: '',
       width: '',
       height: '',
+      itemDescription: '',
+      tankType: '',
+      remarks: '',
     };
     setEditedCard(prev => ({
       ...prev,
@@ -95,6 +98,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   };
 
   const formatTankSize = (tank: TankDetail) => [tank.length, tank.width, tank.height].filter(Boolean).join('x') || '-';
+  const formatTankType = (tank: TankDetail) => tank.tankType || '-';
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
   const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
@@ -469,7 +473,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         <select
                           value={editedCard.scheduleType || 'Delivery'}
                           onChange={(e) => {
-                            const nextType = e.target.value as 'Delivery' | 'Installation';
+                            const nextType = e.target.value as import('@/types').ScheduleType;
                             setEditedCard({
                               ...editedCard,
                               scheduleType: nextType,
@@ -480,6 +484,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                         >
                           <option value="Delivery">Delivery</option>
                           <option value="Installation">Installation</option>
+                          <option value="Delivery & Installation">Delivery & Installation</option>
                         </select>
                       </div>
                     )}
@@ -528,7 +533,8 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                   {isEditing ? (
                     <div className="space-y-2">
                       {(editedCard.tankDetails ?? []).map((tank, index) => (
-                        <div key={tank.id} className="grid grid-cols-[72px_1fr_1fr_1fr_36px] gap-2 items-end">
+                        <div key={tank.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-[72px_1fr_1fr_1fr_120px_36px] gap-2 items-end">
                           <div>
                             <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Label</label>
                             <input
@@ -569,6 +575,18 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                               placeholder="3 or 3(1+2)"
                             />
                           </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Type</label>
+                            <select
+                              value={tank.tankType}
+                              onChange={(e) => updateTankDetail(tank.id, 'tankType', e.target.value)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            >
+                              <option value="">Select</option>
+                              <option value="INS">INS</option>
+                              <option value="NON-INS">NON-INS</option>
+                            </select>
+                          </div>
                           <button
                             type="button"
                             onClick={() => removeTankDetail(tank.id)}
@@ -577,6 +595,27 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
+                          </div>
+                          <div className="md:col-span-3">
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Item Description</label>
+                            <input
+                              type="text"
+                              value={tank.itemDescription}
+                              onChange={(e) => updateTankDetail(tank.id, 'itemDescription', e.target.value)}
+                              className="w-full px-2 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Tank item description"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Remarks</label>
+                            <textarea
+                              value={tank.remarks}
+                              onChange={(e) => updateTankDetail(tank.id, 'remarks', e.target.value)}
+                              rows={2}
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                              placeholder="Add tank-specific remarks"
+                            />
+                          </div>
                         </div>
                       ))}
                       {(editedCard.tankDetails ?? []).length === 0 && (
@@ -586,10 +625,17 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {(card.tankDetails ?? []).length > 0 ? (card.tankDetails ?? []).map(tank => (
-                        <div key={tank.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 flex items-center justify-between gap-3">
+                        <div key={tank.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
                           <div>
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{tank.label}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{tank.label}</p>
+                              <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-600 border border-gray-200">
+                                {formatTankType(tank)}
+                              </span>
+                            </div>
                             <p className="text-sm font-medium text-gray-800">{formatTankSize(tank)}</p>
+                            {tank.itemDescription && <p className="text-xs text-gray-600 leading-relaxed">{tank.itemDescription}</p>}
+                            {tank.remarks && <p className="text-xs text-gray-500 leading-relaxed">{tank.remarks}</p>}
                           </div>
                         </div>
                       )) : (

@@ -127,7 +127,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
   // Pre-create dialog for WO channel / Work Order list (Technical dept only)
   const [woPreCreate, setWOPreCreate] = useState<{
     list: ListType;
-    scheduleType?: 'Delivery' | 'Installation';
+    scheduleType?: import('@/types').ScheduleType;
     woNumber: string;
     companyCode: string;
     poFile: { name: string; raw: File } | null;
@@ -518,7 +518,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const _woNow = new Date().toISOString();
     const uid = localStorage.getItem('userId');
     const performedBy = uid ? Number(uid) : undefined;
-    const scheduleType: 'Delivery' | 'Installation' | undefined =
+    const scheduleType: import('@/types').ScheduleType | undefined =
       woPreCreate.list === 'Schedule' ? woPreCreate.scheduleType : undefined;
     if (woPreCreate.list === 'Schedule' && !scheduleType) return;
     const scheduleStage = woPreCreate.list === 'Schedule'
@@ -728,7 +728,11 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const now = new Date().toISOString();
     const updatedCards = cards.map(card => {
       if (card.id !== cardId) return card;
-      const next = card.scheduleType === 'Delivery' ? 'Installation' : 'Delivery';
+      const next = card.scheduleType === 'Delivery'
+        ? 'Installation'
+        : card.scheduleType === 'Installation'
+          ? 'Delivery & Installation'
+          : 'Delivery';
       return { ...card, scheduleType: next as import('@/types').ScheduleType, updatedAt: now };
     });
     setCards(updatedCards);
@@ -763,7 +767,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     setCards(updatedCards);
   };
 
-  const applyCardMove = (cardId: string, destList: ListType, scheduleType?: 'Delivery' | 'Installation') => {
+  const applyCardMove = (cardId: string, destList: ListType, scheduleType?: import('@/types').ScheduleType) => {
     const movedCard = cards.find(card => card.id === cardId);
     if (!movedCard) return;
 
@@ -787,6 +791,18 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     const updatedCards = cards.map(card => card.id === cardId ? updatedCard : card);
     setCards(updatedCards);
 
+    // Persist immediately so Schedule channel polling sees the move even if
+    // parent diff-based syncing misses this transition in edge timing cases.
+    void (async () => {
+      try {
+        const { updateCard } = await import('@/lib/api');
+        const uid = localStorage.getItem('userId');
+        await updateCard(updatedCard, uid ? Number(uid) : undefined);
+      } catch (error) {
+        console.error('Failed to persist card move', error);
+      }
+    })();
+
     if (selectedCard?.id === cardId) {
       setSelectedCard(updatedCard);
     }
@@ -806,8 +822,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
       return;
     }
 
-    const sourceList = source.droppableId as ListType;
-    const destList = destination.droppableId as ListType;
+    const sourceList = normalizeListType(source.droppableId);
+    const destList = normalizeListType(destination.droppableId);
     const cardId = draggableId;
 
     // Find the card being moved
@@ -815,6 +831,10 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
     if (!movedCard) return;
 
     if (destList === 'Schedule' && sourceList !== 'Schedule') {
+      if (movedCard.scheduleType) {
+        applyCardMove(cardId, 'Schedule', movedCard.scheduleType);
+        return;
+      }
       setPendingScheduleChoice({ srcId: sourceList, dstId: destList, cardId, dstIdx: destination.index });
       return;
     }
@@ -1635,7 +1655,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               <h3 className="text-base font-semibold text-gray-900">Choose Schedule Type</h3>
               <p className="text-sm text-gray-500 mt-1">Pick how this card should appear in Schedule.</p>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-3">
+            <div className="p-4 grid grid-cols-3 gap-3">
               <button
                 onClick={() => { applyCardMove(pendingScheduleChoice.cardId, 'Schedule', 'Delivery'); setPendingScheduleChoice(null); }}
                 className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-left hover:bg-amber-100 transition-colors"
@@ -1649,6 +1669,13 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
               >
                 <div className="text-sm font-semibold text-emerald-800">Installation</div>
                 <div className="text-xs text-emerald-700 mt-1">Pending installation</div>
+              </button>
+              <button
+                onClick={() => { applyCardMove(pendingScheduleChoice.cardId, 'Schedule', 'Delivery & Installation'); setPendingScheduleChoice(null); }}
+                className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-left hover:bg-blue-100 transition-colors"
+              >
+                <div className="text-sm font-semibold text-blue-800">Delivery & Installation</div>
+                <div className="text-xs text-blue-700 mt-1">Pending both workflows</div>
               </button>
             </div>
             <div className="px-4 pb-4 flex justify-end">
@@ -1880,7 +1907,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                     <span className="text-sm font-semibold text-gray-800">Schedule Type</span>
                     <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">Required</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setWOPreCreate(p => p ? { ...p, scheduleType: 'Delivery' } : null)}
@@ -1902,6 +1929,17 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                       }`}
                     >
                       Installation pending
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWOPreCreate(p => p ? { ...p, scheduleType: 'Delivery & Installation' } : null)}
+                      className={`rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
+                        woPreCreate.scheduleType === 'Delivery & Installation'
+                          ? 'border-blue-300 bg-blue-50 text-blue-800'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Delivery & Installation
                     </button>
                   </div>
                 </div>

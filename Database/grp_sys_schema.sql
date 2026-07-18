@@ -139,7 +139,7 @@ CREATE TABLE cards (
     assigned_to_name        VARCHAR(100),
     user_work_status        working_status_type DEFAULT 'Unassigned',
     payment_percent         INTEGER      NOT NULL DEFAULT 0,
-    schedule_type           VARCHAR(20),
+    schedule_type           VARCHAR(40),
     schedule_stage          VARCHAR(40),
     assignment_history      JSONB,
 

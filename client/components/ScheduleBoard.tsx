@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   format, addDays, parseISO, isToday, isSunday,
   differenceInCalendarDays, startOfDay, isBefore,
@@ -8,7 +8,7 @@ import {
   X, Plus, ChevronLeft, ChevronRight, Truck, Wrench, Users,
   CheckCircle, MessageSquare, AlertTriangle, Zap, CalendarRange,
   ChevronDown, Check, FileText, ClipboardList, Search,
-  TrendingUp, Clock, ArrowUp,
+  TrendingUp, Clock, ArrowUp, Maximize2,
 } from 'lucide-react';
 import { Card as WorkOrderCard, ChannelType, ScheduleStage, TankDetail } from '@/types';
 import { fetchCards, updateCard, fetchPendingReportDetails, generateDailyReports, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
@@ -35,17 +35,40 @@ interface ScDelayPeriod {
   endDate?: string;
 }
 
+type SchedulePhase = 'delivery' | 'installation';
+
+interface ScTankProgress {
+  tankDetailId: string;
+  label: string;
+  tankSize: string;
+  itemDescription: string;
+  tankType: '' | 'INS' | 'NON-INS';
+  remarks: string;
+  // "Del. Start" / "Inst. Start" — the current-selection progress dropdown.
+  deliveryStatus: 'Not Delivered' | 'Partially Delivered' | 'Completed';
+  installationStatus: 'Not Started' | 'Partially Installed' | 'Completed';
+  // "Delivery Status" / "Installation Status" — free-text note, separate from the dropdown above.
+  deliveryStatusText?: string;
+  installationStatusText?: string;
+  workers: string[];
+  completionDate?: string;
+}
+
 export interface ScCard {
   id: string; woCode: string; listId: string; workers: string[];
+  updatedAt?: string;
   sourceCardId?: string;
+  phase?: SchedulePhase;
   tankDetailId?: string;
   tankLabel?: string;
-  tankGroupLocked?: boolean;
-  scheduleType?: 'Delivery' | 'Installation';
+  scheduleType?: 'Delivery' | 'Installation' | 'Delivery & Installation';
   isEmergency: boolean; paymentPercent: number; isConfirmed: boolean;
   confirmedDate?: string; remarks: ScRemark[]; createdAt: string;
   brand?: string; productType?: string;
   customer?: string; location?: string; tankSize?: string;
+  deliveryPerson?: string;
+  sectionRemarks?: string;
+  tanks?: ScTankProgress[];
   contactPerson?: string; phone?: string; salesPerson?: string;
   deliveryStatus?: string;
   installationStatus?: string;
@@ -57,13 +80,74 @@ type ScStore = Record<string, ScCard[]>;
 
 const EMPTY_STORE: ScStore = {
   'pending-delivery': [],
+  'status-delivery': [],
+  'planning-delivery': [],
   'pending-installation': [],
+  'status-installation': [],
+  'planning-installation': [],
+  'archive-completed': [],
+};
+
+const DELIVERY_PENDING = 'pending-delivery';
+const DELIVERY_STATUS = 'status-delivery';
+const DELIVERY_PLANNING = 'planning-delivery';
+const INSTALLATION_PENDING = 'pending-installation';
+const INSTALLATION_STATUS = 'status-installation';
+const INSTALLATION_PLANNING = 'planning-installation';
+const ARCHIVE_COMPLETED = 'archive-completed';
+
+const isDeliveryListId = (listId: string) => listId.endsWith('-delivery');
+const isInstallationListId = (listId: string) => listId.endsWith('-installation');
+const isArchiveListId = (listId: string) => listId === ARCHIVE_COMPLETED;
+const getPhaseForListId = (listId: string): SchedulePhase => (isInstallationListId(listId) ? 'installation' : 'delivery');
+const getPendingListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PENDING : INSTALLATION_PENDING;
+const getStatusListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_STATUS : INSTALLATION_STATUS;
+const getPlanningListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PLANNING : INSTALLATION_PLANNING;
+
+const normalizeTankSize = (tank?: Partial<TankDetail>) => [tank?.length, tank?.width, tank?.height].filter(Boolean).join('x');
+
+const toTankProgress = (card: WorkOrderCard, existingById: Record<string, ScTankProgress> = {}): ScTankProgress[] => {
+  const woTanks = card.tankDetails ?? [];
+  if (woTanks.length === 0) {
+    const id = 'base';
+    const existing = existingById[id];
+    return [{
+      tankDetailId: id,
+      label: 'T1',
+      tankSize: deriveTankSize(card) || '',
+      itemDescription: '',
+      tankType: '',
+      remarks: existing?.remarks ?? '',
+      deliveryStatus: existing?.deliveryStatus ?? 'Not Delivered',
+      installationStatus: existing?.installationStatus ?? 'Not Started',
+      workers: existing?.workers ?? [],
+      completionDate: existing?.completionDate,
+    }];
+  }
+  return woTanks.map((tank, index) => {
+    const id = tank.id || `tank-${index + 1}`;
+    const existing = existingById[id];
+    return {
+      tankDetailId: id,
+      label: tank.label || `T${index + 1}`,
+      tankSize: normalizeTankSize(tank),
+      itemDescription: tank.itemDescription || '',
+      tankType: tank.tankType || '',
+      remarks: existing?.remarks ?? (tank.remarks || ''),
+      deliveryStatus: existing?.deliveryStatus ?? 'Not Delivered',
+      installationStatus: existing?.installationStatus ?? 'Not Started',
+      workers: existing?.workers ?? [],
+      completionDate: existing?.completionDate,
+    };
+  });
 };
 
 const GANTT_VISIBLE_DAYS = 9;
 const GANTT_TOTAL_DAYS = 16;
 const GANTT_MIN_DAY_WIDTH = 36;
 const GANTT_MAX_DAY_WIDTH = 160;
+const NUM_COLS = 9;
+const INSTALLATION_COLS = 9;
 const BRAND_OPTIONS = ['COLEX', 'PIPECO'] as const;
 
 const normalizeBrand = (brand?: string): string | undefined => {
@@ -91,30 +175,7 @@ const deriveTankSize = (card: WorkOrderCard): string | undefined => {
   return firstItem?.itemDescription?.trim() || undefined;
 };
 
-const formatTankDimensions = (tank?: Partial<TankDetail>): string => [tank?.length, tank?.width, tank?.height].filter(Boolean).join('x');
-
-type ScheduleTankSeed = {
-  tankDetailId: string;
-  tankLabel: string;
-  tankSize?: string;
-};
-
-const getScheduleTankSeeds = (card: WorkOrderCard): ScheduleTankSeed[] => {
-  const tankDetails = (card.tankDetails ?? []).filter(tank => tank.length || tank.width || tank.height || tank.label);
-  if (tankDetails.length === 0) {
-    return [{ tankDetailId: 'base', tankLabel: '', tankSize: deriveTankSize(card) }];
-  }
-  return tankDetails.map((tank, index) => ({
-    tankDetailId: tank.id || `tank-${index + 1}`,
-    tankLabel: tank.label || `T${index + 1}`,
-    tankSize: formatTankDimensions(tank),
-  }));
-};
-
-const makeScheduleCardId = (cardId: string, tankDetailId: string) => tankDetailId === 'base' ? `wo-${cardId}` : `wo-${cardId}-${tankDetailId}`;
-
-const makeScheduleWoCode = (baseWoCode: string, tankLabel: string, hasMultipleTanks: boolean) =>
-  hasMultipleTanks && tankLabel ? `${baseWoCode}-${tankLabel}` : baseWoCode;
+const makeScheduleCardId = (cardId: string, phase: SchedulePhase) => `wo-${cardId}-${phase}`;
 
 const deriveContactPerson = (card: WorkOrderCard): string | undefined => {
   const details = card.workOrderDetails;
@@ -148,27 +209,138 @@ const isCardDelayedOnDate = (card: ScCard, day: string) => {
 
 const isCardCurrentlyDelayed = (card: ScCard) => Boolean((card.delayPeriods ?? []).some(period => !period.endDate));
 
+/** Builds the compact day-by-day progress strip (green = in progress, red = pending/delayed)
+ * for a card's hover mini-gantt, matching the original full-timeline gantt's coloring rule. */
+const getCardGanttDays = (card: ScCard, maxDays = 14) => {
+  const startDate = startOfDay(parseISO(card.confirmedDate || card.createdAt || dateKey()));
+  const endAnchor = card.completedDate ? startOfDay(parseISO(card.completedDate)) : startOfDay(new Date());
+  const progressedDays = Math.max(1, differenceInCalendarDays(endAnchor, startDate) + 1);
+  const shown = Math.min(progressedDays, maxDays);
+  return Array.from({ length: shown }, (_, idx) => {
+    const segmentDate = format(addDays(endAnchor, -(shown - 1 - idx)), 'yyyy-MM-dd');
+    return {
+      key: `${card.id}-${segmentDate}`,
+      date: segmentDate,
+      color: isCardDelayedOnDate(card, segmentDate) ? '#ef4444' : '#22c55e',
+    };
+  });
+};
+
 const flattenCards = (store: ScStore): ScCard[] => Object.values(store).flat();
 
+/**
+ * Best-effort reconstruction of "what the schedule looked like on a given
+ * past/future date" for the read-only date search feature. We don't keep a
+ * full per-day audit log, so this approximates by:
+ *  - Excluding cards that didn't exist yet (createdAt after the search date).
+ *  - Excluding archived (fully completed) cards that were already completed
+ *    and removed on/before the search date.
+ *  - Placing archived cards that were still incomplete on the search date
+ *    back into their phase's STATUS column (their last known active stage).
+ *  - Otherwise showing currently-active cards in their current list.
+ */
+const buildHistoricalStore = (base: ScStore, searchDay: string): ScStore => {
+  const day = startOfDay(parseISO(searchDay)).getTime();
+  const next: ScStore = {};
+  Object.keys(base).forEach(listId => {
+    if (!isArchiveListId(listId)) next[listId] = [];
+  });
+  next[ARCHIVE_COMPLETED] = [];
+
+  const activeByIdentity = new Map<string, { card: ScCard; listId: string }>();
+  Object.entries(base).forEach(([listId, cards]) => {
+    if (isArchiveListId(listId)) return;
+    (cards ?? []).forEach(card => activeByIdentity.set(getCardIdentity(card), { card, listId }));
+  });
+
+  const existedByDay = (card: ScCard) => {
+    const createdTime = Date.parse(card.createdAt || '');
+    if (Number.isNaN(createdTime)) return true;
+    return startOfDay(createdTime).getTime() <= day;
+  };
+
+  const seen = new Set<string>();
+  (base[ARCHIVE_COMPLETED] ?? []).forEach(card => {
+    const identity = getCardIdentity(card);
+    seen.add(identity);
+    if (!existedByDay(card)) return;
+    const completedTime = Date.parse(card.completedDate || card.confirmedDate || card.updatedAt || '');
+    if (!Number.isNaN(completedTime) && startOfDay(completedTime).getTime() <= day) return;
+    const phase = card.phase ?? 'delivery';
+    const statusListId = phase === 'installation' ? 'status-installation' : 'status-delivery';
+    if (!next[statusListId]) next[statusListId] = [];
+    next[statusListId].push(card);
+  });
+
+  activeByIdentity.forEach(({ card, listId }, identity) => {
+    if (seen.has(identity)) return;
+    if (!existedByDay(card)) return;
+    if (!next[listId]) next[listId] = [];
+    next[listId].push(card);
+  });
+
+  return next;
+};
+
+const getCardIdentity = (card: ScCard) => `${card.sourceCardId ?? card.id}:${card.phase ?? getPhaseForListId(card.listId)}`;
+
+const collectCardByIdentity = (store: ScStore): Record<string, ScCard> => {
+  const result: Record<string, ScCard> = {};
+  flattenCards(store).forEach(card => {
+    result[getCardIdentity(card)] = card;
+  });
+  return result;
+};
+
+const isCardCompleteForPhase = (card: ScCard, phase: SchedulePhase): boolean => {
+  const tanks = card.tanks ?? [];
+  if (tanks.length === 0) {
+    if (phase === 'delivery') return card.deliveryStatus === 'Completed';
+    return card.installationStatus === 'Completed' || !!card.completedDate;
+  }
+  if (phase === 'delivery') return tanks.every(t => t.deliveryStatus === 'Completed');
+  return tanks.every(t => t.installationStatus === 'Completed');
+};
+
+const getTanksLeftForPhase = (card: ScCard, phase: SchedulePhase): number => {
+  const tanks = card.tanks ?? [];
+  if (tanks.length === 0) return isCardCompleteForPhase(card, phase) ? 0 : 1;
+  if (phase === 'delivery') return tanks.filter(t => t.deliveryStatus !== 'Completed').length;
+  return tanks.filter(t => t.installationStatus !== 'Completed').length;
+};
+
+const getPhaseStatusLabel = (card: ScCard, phase: SchedulePhase): string => {
+  const tanks = card.tanks ?? [];
+  if (tanks.length === 0) {
+    if (phase === 'delivery') return card.deliveryStatus || 'Not Delivered';
+    return card.installationStatus || 'Not Started';
+  }
+  const completed = getTanksLeftForPhase(card, phase) === 0;
+  if (completed) return 'Completed';
+  if (phase === 'delivery') {
+    return tanks.some(t => t.deliveryStatus === 'Partially Delivered' || t.deliveryStatus === 'Completed')
+      ? 'Partial Delivery'
+      : 'Not Delivered';
+  }
+  return tanks.some(t => t.installationStatus === 'Partially Installed' || t.installationStatus === 'Completed')
+    ? 'Partially Installed'
+    : 'Not Started';
+};
+
 const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
-  if (listId === 'pending-delivery') return 'Pending delivery';
-  if (listId === 'pending-installation') return 'Pending installation';
-
-  const dayLabel = listId.replace(/^(delivery|installation)-/, '');
-  const isDelivery = listId.startsWith('delivery-') || (card.scheduleType ?? 'Delivery') === 'Delivery';
-  const isInstallation = listId.startsWith('installation-') || (card.scheduleType ?? 'Delivery') === 'Installation';
-
-  if (isDelivery) {
-    return card.isConfirmed ? 'Delivery completed' : 'Delivery scheduled';
+  const phase = getPhaseForListId(listId);
+  const isPending = listId.startsWith('pending-');
+  const isPlanning = listId.startsWith('planning-');
+  const isStatus = listId.startsWith('status-');
+  if (phase === 'delivery') {
+    if (isPending || isPlanning) return 'Pending delivery';
+    if (isStatus && isCardCompleteForPhase(card, 'delivery')) return 'Delivery completed';
+    return 'Delivery scheduled';
   }
-
-  if (isInstallation) {
-    if (card.completedDate) return 'Installation completed';
-    if (!card.isConfirmed) return 'Installation scheduled';
-    return card.confirmedDate && card.confirmedDate === dayLabel ? 'Installation started' : 'Installation in progress';
-  }
-
-  return card.scheduleType === 'Installation' ? 'Pending installation' : 'Pending delivery';
+  if (isPending || isPlanning) return 'Pending installation';
+  if (isStatus && isCardCompleteForPhase(card, 'installation')) return 'Installation completed';
+  if (isStatus && card.isConfirmed) return 'Installation in progress';
+  return 'Installation scheduled';
 };
 
 const sortScheduleGroup = (cards: ScCard[]) => {
@@ -181,7 +353,8 @@ const sortScheduleGroup = (cards: ScCard[]) => {
   });
 };
 
-const inferScheduleTypeFromWorkOrder = (card: WorkOrderCard): 'Delivery' | 'Installation' => {
+const inferScheduleTypeFromWorkOrder = (card: WorkOrderCard): 'Delivery' | 'Installation' | 'Delivery & Installation' => {
+  if (card.scheduleType === 'Delivery & Installation') return 'Delivery & Installation';
   if (card.scheduleType === 'Installation' || card.list === 'Installation') return 'Installation';
   if (card.scheduleType === 'Delivery' || card.list === 'Delivery') return 'Delivery';
   const stage = (card.scheduleStage ?? '').toLowerCase();
@@ -190,7 +363,7 @@ const inferScheduleTypeFromWorkOrder = (card: WorkOrderCard): 'Delivery' | 'Inst
 };
 
 const hasExplicitScheduleMetadata = (card: WorkOrderCard): boolean => {
-  if (card.scheduleType === 'Delivery' || card.scheduleType === 'Installation') return true;
+  if (card.scheduleType === 'Delivery' || card.scheduleType === 'Installation' || card.scheduleType === 'Delivery & Installation') return true;
   const stage = (card.scheduleStage ?? '').toLowerCase();
   return stage.includes('delivery') || stage.includes('installation');
 };
@@ -199,16 +372,15 @@ const toScheduleCards = (card: WorkOrderCard): ScCard[] => {
   const scheduleType = inferScheduleTypeFromWorkOrder(card);
   const baseWoCode = deriveWoCode(card);
   const details = card.workOrderDetails;
-  const tankSeeds = getScheduleTankSeeds(card);
-  return tankSeeds.map(seed => ({
-    id: makeScheduleCardId(String(card.id), seed.tankDetailId),
+  const tanks = toTankProgress(card);
+  const phases: SchedulePhase[] = scheduleType === 'Delivery & Installation' ? ['delivery', 'installation'] : [scheduleType === 'Installation' ? 'installation' : 'delivery'];
+  return phases.map(phase => ({
+    id: makeScheduleCardId(String(card.id), phase),
     sourceCardId: card.id,
-    tankDetailId: seed.tankDetailId,
-    tankLabel: seed.tankLabel,
-    tankGroupLocked: tankSeeds.length > 1,
-    woCode: makeScheduleWoCode(baseWoCode, seed.tankLabel, tankSeeds.length > 1),
+    phase,
+    woCode: baseWoCode,
     scheduleType,
-    listId: scheduleType === 'Installation' ? 'pending-installation' : 'pending-delivery',
+    listId: getPendingListForPhase(phase),
     workers: [],
     isEmergency: false,
     paymentPercent: typeof card.paymentPercent === 'number' ? card.paymentPercent : 0,
@@ -217,7 +389,8 @@ const toScheduleCards = (card: WorkOrderCard): ScCard[] => {
     createdAt: card.createdAt || new Date().toISOString(),
     customer: card.customerName || card.customerCompanyName || undefined,
     location: card.projectLocation || undefined,
-    tankSize: seed.tankSize || deriveTankSize(card),
+    tankSize: tanks.map(t => t.tankSize).filter(Boolean).join(', ') || deriveTankSize(card),
+    tanks,
     contactPerson: deriveContactPerson(card),
     phone: derivePhoneNumber(card),
     salesPerson: card.salesPerson || undefined,
@@ -226,72 +399,106 @@ const toScheduleCards = (card: WorkOrderCard): ScCard[] => {
   }));
 };
 
-const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): ScStore => {
+const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[], referenceDay: string = dateKey()): ScStore => {
   const next: ScStore = JSON.parse(JSON.stringify(store));
-  const flat = flattenCards(next);
+  if (!next[ARCHIVE_COMPLETED]) next[ARCHIVE_COMPLETED] = [];
 
-  const relevant = woCards.filter(c => c.list === 'Schedule' || c.list === 'Delivery' || c.list === 'Installation');
+  const byIdentity: Record<string, ScCard> = {};
+  Object.entries(next).forEach(([listId, cards]) => {
+    if (isArchiveListId(listId)) return;
+    (cards ?? []).forEach(card => {
+      byIdentity[getCardIdentity(card)] = card;
+    });
+  });
+
+  const archivedByIdentity: Record<string, ScCard> = {};
+  (next[ARCHIVE_COMPLETED] ?? []).forEach(card => {
+    archivedByIdentity[getCardIdentity(card)] = card;
+  });
+
+  const todayRef = startOfDay(parseISO(referenceDay));
+  const relevant = woCards.filter(card => {
+    if (!hasExplicitScheduleMetadata(card) && card.list !== 'Schedule' && card.list !== 'Delivery' && card.list !== 'Installation') return false;
+    const payment = typeof card.paymentPercent === 'number' ? card.paymentPercent : 0;
+    if (payment < 100) return true;
+    if (!card.completedAt) return true;
+    const completed = new Date(card.completedAt);
+    if (Number.isNaN(completed.getTime())) return true;
+    return startOfDay(completed).getTime() >= todayRef.getTime();
+  });
+
   const relevantIds = new Set(relevant.map(c => String(c.id)));
 
   // Remove schedule cards that are linked to WO cards no longer in Delivery/Installation
   Object.keys(next).forEach(listId => {
+    if (isArchiveListId(listId)) return;
     next[listId] = (next[listId] ?? []).filter(sc => !sc.sourceCardId || relevantIds.has(String(sc.sourceCardId)));
   });
 
   relevant.forEach(wo => {
-    const explicitSchedule = hasExplicitScheduleMetadata(wo);
-    const hasMultipleTankSchedules = (wo.tankDetails?.length ?? 0) > 1;
     const inferredType = inferScheduleTypeFromWorkOrder(wo);
-    const targetPending = inferredType === 'Installation' ? 'pending-installation' : 'pending-delivery';
     const freshCards = toScheduleCards(wo);
-    const seedIds = new Set(freshCards.map(card => card.tankDetailId ?? 'base'));
+    const freshIdentities = new Set(freshCards.map(getCardIdentity));
 
     Object.keys(next).forEach(listId => {
+      if (isArchiveListId(listId)) return;
       next[listId] = (next[listId] ?? []).filter(sc => {
         if (String(sc.sourceCardId) !== String(wo.id)) return true;
-        return seedIds.has(sc.tankDetailId ?? 'base');
+        return freshIdentities.has(getCardIdentity(sc));
       });
     });
 
-    if (wo.list === 'Schedule' && !explicitSchedule) {
-      return;
-    }
+    freshCards.forEach(fresh => {
+      const identity = getCardIdentity(fresh);
+      const existing = byIdentity[identity];
+      const archived = archivedByIdentity[identity];
 
-    freshCards.forEach((fresh, index) => {
-      const existing = flat.find(sc =>
-        String(sc.sourceCardId) === String(wo.id) &&
-        ((sc.tankDetailId ?? 'base') === (fresh.tankDetailId ?? 'base') || (!sc.tankDetailId && index === 0))
-      );
+      if (!existing && archived) {
+        const archivedAt = Date.parse(archived.updatedAt || archived.completedDate || archived.confirmedDate || archived.createdAt || '');
+        const woUpdatedAt = Date.parse(wo.updatedAt || wo.createdAt || '');
+        if (!Number.isNaN(archivedAt) && (Number.isNaN(woUpdatedAt) || woUpdatedAt <= archivedAt)) {
+          return;
+        }
+      }
 
       if (existing) {
         existing.woCode = fresh.woCode;
-        existing.tankDetailId = fresh.tankDetailId;
-        existing.tankLabel = fresh.tankLabel;
+        existing.scheduleType = fresh.scheduleType;
+        existing.phase = fresh.phase;
         existing.paymentPercent = typeof wo.paymentPercent === 'number' ? wo.paymentPercent : 0;
         existing.customer = wo.customerName || wo.customerCompanyName || undefined;
         existing.location = wo.projectLocation || undefined;
         existing.tankSize = fresh.tankSize;
+        const existingTankById = Object.fromEntries((existing.tanks ?? []).map(t => [t.tankDetailId, t]));
+        existing.tanks = toTankProgress(wo, existingTankById);
         existing.contactPerson = deriveContactPerson(wo);
         existing.phone = derivePhoneNumber(wo);
         existing.salesPerson = wo.salesPerson || undefined;
         existing.brand = normalizeBrand(wo.workOrderDetails?.brand);
         existing.productType = deriveProductType(wo);
-        existing.tankGroupLocked = existing.tankGroupLocked ?? fresh.tankGroupLocked;
-        if (explicitSchedule && !hasMultipleTankSchedules) {
-          existing.scheduleType = inferredType;
-          if (existing.listId.startsWith('pending-') && existing.listId !== targetPending) {
-            const fromList = existing.listId;
-            next[fromList] = (next[fromList] ?? []).filter(sc => sc.id !== existing.id);
-            const moved = { ...existing, scheduleType: inferredType, listId: targetPending };
-            if (!next[targetPending]) next[targetPending] = [];
-            next[targetPending] = [moved, ...next[targetPending]];
-          }
+        if (!existing.listId || (!existing.listId.startsWith('pending-') && !existing.listId.startsWith('status-') && !existing.listId.startsWith('planning-'))) {
+          existing.listId = getPendingListForPhase(existing.phase ?? getPhaseForListId(fresh.listId));
         }
         return;
       }
 
-      if (!next[fresh.listId]) next[fresh.listId] = [];
-      next[fresh.listId] = [fresh, ...next[fresh.listId]];
+      const seeded = archived
+        ? {
+            ...fresh,
+            workers: archived.workers?.length ? archived.workers : fresh.workers,
+            sectionRemarks: fresh.sectionRemarks || archived.sectionRemarks,
+            tanks: (fresh.tanks ?? []).map(t => {
+              const archivedTank = (archived.tanks ?? []).find(at => at.tankDetailId === t.tankDetailId);
+              return {
+                ...t,
+                workers: t.workers?.length ? t.workers : (archivedTank?.workers ?? []),
+              };
+            }),
+          }
+        : fresh;
+
+      if (!next[seeded.listId]) next[seeded.listId] = [];
+      next[seeded.listId] = [seeded, ...next[seeded.listId]];
     });
   });
 
@@ -301,16 +508,30 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[]): S
 const normalizeStore = (raw: unknown): ScStore => {
   const normalized: ScStore = {
     'pending-delivery': [],
+    'status-delivery': [],
+    'planning-delivery': [],
     'pending-installation': [],
+    'status-installation': [],
+    'planning-installation': [],
+    [ARCHIVE_COMPLETED]: [],
   };
   if (!raw || typeof raw !== 'object') return normalized;
   Object.entries(raw as Record<string, unknown>).forEach(([key, value]) => {
     if (Array.isArray(value)) {
-      normalized[key] = (value as ScCard[]).map(card => ({
+      const mappedKey =
+        key === 'pending-delivery' || key === 'pending-installation' || key === 'status-delivery' || key === 'status-installation' || key === 'planning-delivery' || key === 'planning-installation' || key === ARCHIVE_COMPLETED
+          ? key
+          : key.startsWith('delivery-')
+            ? 'status-delivery'
+            : key.startsWith('installation-')
+              ? 'status-installation'
+              : key;
+      if (!normalized[mappedKey]) normalized[mappedKey] = [];
+      normalized[mappedKey] = [...normalized[mappedKey], ...(value as ScCard[]).map(card => ({
         ...card,
         woCode: normalizeWoCode(card.woCode),
-        tankGroupLocked: card.tankGroupLocked ?? true,
-      }));
+        phase: card.phase ?? (mappedKey === ARCHIVE_COMPLETED ? card.phase : getPhaseForListId(mappedKey)),
+      }))];
     }
   });
   return normalized;
@@ -323,6 +544,14 @@ const pColor = (p: number) => p === 0 ? '#ef4444' : p < 50 ? '#eab308' : p < 100
 const pBorder = (p: number) => p === 0 ? '#dc2626' : p < 50 ? '#ca8a04' : p < 100 ? '#2563eb' : '#16a34a';
 const pBg    = (p: number) => p === 0 ? '#fef2f2' : p < 50 ? '#fefce8' : p < 100 ? '#eff6ff' : '#f0fdf4';
 
+/** Distinct colour per tank status value: gray = not started/not delivered,
+ * amber = partially delivered/installed, green = completed. */
+const tankStatusColorClass = (s: string) => {
+  if (s === 'Completed') return 'bg-emerald-100 border-emerald-300 text-emerald-700';
+  if (s === 'Partially Delivered' || s === 'Partially Installed') return 'bg-amber-100 border-amber-300 text-amber-700';
+  return 'bg-gray-100 border-gray-300 text-gray-600';
+};
+
 /** Dot rules:
  * - Delivery/Installation columns: green only when confirmed (started/delivered)
  * - Pending columns: red only when returned from schedule
@@ -330,24 +559,122 @@ const pBg    = (p: number) => p === 0 ? '#fef2f2' : p < 50 ? '#fefce8' : p < 100
 const dateDot = (card: ScCard) => (card.isConfirmed ? '#22c55e' : '');
 const pendDot = (card: ScCard) => (card.returnedFromDate ? '#ef4444' : '');
 
+type MatrixColumn = {
+  key: 'wo' | 'payment' | 'customer' | 'brand' | 'location' | 'tanks' | 'status' | 'owner' | 'delPerson' | 'remarks' | 'tankBreakdown';
+  label: string;
+};
+
+const getMatrixTemplateColumns = (columns: MatrixColumn[]) => {
+  const widths: Record<MatrixColumn['key'], string> = {
+    wo: '0.7fr',
+    payment: '0.5fr',
+    customer: '1fr',
+    brand: '0.65fr',
+    location: '0.85fr',
+    tanks: '0.55fr',
+    status: '0.95fr',
+    owner: '0.95fr',
+    delPerson: '0.85fr',
+    remarks: '1.1fr',
+    tankBreakdown: '0.7fr',
+  };
+  // minmax(0, ...) lets each grid track shrink below its content's natural
+  // (max-content) width — plain "Nfr" tracks default to an "auto" minimum,
+  // which ignores the fr weighting and forces the row to overflow/wrap onto a
+  // second visual line once combined content exceeds the card's width.
+  return columns.map(c => `minmax(0, ${widths[c.key]})`).join(' ');
+};
+
+/** Landing-page card columns (before expanding): WO No, Payment, Customer,
+ * Brand, Location, Tanks Left, Del. Person (delivery rows only), Tanks. */
+const getMatrixColumns = (_listId: string, phase: SchedulePhase): MatrixColumn[] => {
+  const cols: MatrixColumn[] = [
+    { key: 'wo', label: 'WO No' },
+    { key: 'payment', label: 'Payment' },
+    { key: 'customer', label: 'Customer' },
+    { key: 'brand', label: 'Brand' },
+    { key: 'location', label: 'Location' },
+    { key: 'tanks', label: 'Tanks Left' },
+  ];
+  if (phase === 'delivery') {
+    cols.push({ key: 'delPerson', label: 'Del. Person' });
+  }
+  cols.push({ key: 'tankBreakdown', label: 'Tanks' });
+  return cols;
+};
+
+const getTankRemarksSummary = (card: ScCard) => {
+  const tanks = card.tanks ?? [];
+  if (tanks.length === 0) return '';
+  const lines = tanks
+    .map(t => {
+      const parts = [t.itemDescription, t.remarks].filter(Boolean);
+      if (parts.length === 0) return '';
+      return `${t.label}: ${parts.join(' | ')}`;
+    })
+    .filter(Boolean);
+  return lines.join(' ; ');
+};
+
+const getMatrixCellValue = (card: ScCard, listId: string, phase: SchedulePhase, key: MatrixColumn['key']): string => {
+  const isPending = listId.startsWith('pending-');
+  const tanksLeft = String(getTanksLeftForPhase(card, phase));
+  const status = isPending ? getPhaseStatusLabel(card, phase) : '-';
+  const owner = phase === 'delivery'
+    ? (card.deliveryPerson || '-')
+    : ((card.workers ?? []).join(', ') || '-');
+  const remarks = card.sectionRemarks || getTankRemarksSummary(card) || '-';
+  switch (key) {
+    case 'wo':
+      return normalizeWoCode(card.woCode);
+    case 'payment':
+      return `${card.paymentPercent ?? 0}%`;
+    case 'delPerson':
+      return card.deliveryPerson || '-';
+    case 'brand':
+      return card.brand || '-';
+    case 'tanks':
+      return tanksLeft;
+    case 'owner':
+      return owner;
+    case 'customer':
+      return card.customer || '-';
+    case 'location':
+      return card.location || '-';
+    case 'status':
+      return status;
+    case 'remarks':
+      return remarks;
+    case 'tankBreakdown':
+      return '';
+    default:
+      return '-';
+  }
+};
+
 /* ─── CardChip – used in BOTH date columns AND pending ───────────────────── */
 
 function CardChip({
   card, listId, index, isPending, onOpen, isDragDisabled,
-}: { card: ScCard; listId: string; index: number; isPending?: boolean; onOpen: () => void; isDragDisabled?: boolean }) {
+}: {
+  card: ScCard;
+  listId: string;
+  index: number;
+  isPending?: boolean;
+  onOpen: () => void;
+  isDragDisabled?: boolean;
+}) {
   const [tipPos, setTipPos] = useState<{x:number;y:number}|null>(null);
   const woCode = normalizeWoCode(card.woCode);
   const dot = isPending ? pendDot(card) : dateDot(card);
   const showDot = Boolean(dot);
   const chipBg = pBg(card.paymentPercent);
-  const meta = [card.customer, card.location].filter(Boolean).join(' · ');
-  const statusText = (listId.startsWith('installation-') || listId === 'pending-installation')
-    ? card.installationStatus
-    : (listId.startsWith('delivery-') || listId === 'pending-delivery')
-      ? card.deliveryStatus
-    : undefined;
-  const compact = !isPending;
+  const phase = getPhaseForListId(listId);
+  const columns = getMatrixColumns(listId, phase);
+  const gridTemplateColumns = getMatrixTemplateColumns(columns);
+  const statusText = getPhaseStatusLabel(card, phase);
   const payPct = card.paymentPercent ?? 0;
+
   return (
     <Draggable draggableId={card.id} index={index} isDragDisabled={isDragDisabled}>
       {(prov, snap) => (
@@ -360,37 +687,242 @@ function CardChip({
             onMouseEnter={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
             onMouseMove={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
             onMouseLeave={() => setTipPos(null)}
-            className={`flex items-center rounded-md border cursor-grab select-none transition-all mb-0.5 min-w-0
-              ${compact ? 'gap-1 px-1.5 py-0.5' : 'gap-1.5 px-2 py-1'}
+            className={`rounded-lg border cursor-grab select-none transition-all mb-1 min-w-0 px-2 py-1.5
               ${card.isEmergency ? 'ring-1 ring-red-300' : ''}
-              ${snap.isDragging ? 'shadow-lg opacity-80' : 'hover:shadow-sm'}`}
+              ${snap.isDragging ? 'shadow-lg opacity-90 rotate-[0.5deg]' : 'hover:shadow-md hover:-translate-y-px'}`}
             style={{
               ...(prov.draggableProps.style as React.CSSProperties),
               backgroundColor: chipBg,
-              borderColor: card.isEmergency ? '#ef4444' : '#9ca3af',
+              borderColor: card.isEmergency ? '#ef4444' : '#d1d5db',
             }}
           >
-            {showDot && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />}
-            <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-semibold text-gray-800 flex-shrink-0`}>{woCode}</span>
-            <span className="text-[10px] font-bold flex-shrink-0" style={{color:pColor(payPct)}}>{payPct}%</span>
-            {isPending && meta && <span className="text-[10px] text-gray-600 truncate min-w-0">{meta}</span>}
-            {statusText && <span className="text-[10px] text-indigo-600 truncate min-w-0">{statusText}</span>}
-            {card.isEmergency && <ArrowUp className="w-3 h-3 text-red-500 flex-shrink-0 ml-auto" />}
-            {isPending && card.returnedFromDate && <span className="text-xs text-red-400 ml-auto">↩</span>}
+            <div className="grid gap-1 min-w-0 items-center" style={{ gridTemplateColumns }}>
+              {columns.map(col => {
+                const value = getMatrixCellValue(card, listId, phase, col.key);
+                const isWo = col.key === 'wo';
+                const isTankBreakdown = col.key === 'tankBreakdown';
+                if (isTankBreakdown) {
+                  const tanks = card.tanks ?? [];
+                  const statusPillClass = (s?: string) => {
+                    if (s === 'Completed') return 'bg-emerald-100 text-emerald-700';
+                    if (s === 'Partially Delivered' || s === 'Partially Installed') return 'bg-amber-100 text-amber-700';
+                    return 'bg-gray-100 text-gray-500';
+                  };
+                  return (
+                    <div key={col.key} className="text-[11px] leading-4 text-gray-700 min-w-0 relative">
+                      <details onClick={e => e.stopPropagation()} className="group">
+                        <summary className="cursor-pointer list-none inline-flex items-center gap-1 whitespace-nowrap text-[10px] text-indigo-700 font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                          Tanks ({tanks.length || 1})
+                          <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180 flex-shrink-0" />
+                        </summary>
+                        <div className="absolute right-0 top-full mt-1.5 z-30 w-64 max-h-64 overflow-y-auto rounded-xl border border-gray-100 bg-white p-2 space-y-1.5 shadow-xl">
+                          {(tanks.length > 0 ? tanks : [{
+                            tankDetailId: 'base',
+                            label: 'T1',
+                            tankSize: card.tankSize || '-',
+                            itemDescription: '',
+                            tankType: '',
+                            remarks: '',
+                            deliveryStatus: (card.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
+                            installationStatus: (card.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
+                            workers: card.workers ?? [],
+                            completionDate: card.completedDate || card.confirmedDate,
+                          }]).map(t => {
+                            const phaseStatus = phase === 'delivery' ? t.deliveryStatus : t.installationStatus;
+                            const showWorkerDate = phase === 'installation' && phaseStatus !== 'Not Started';
+                            const workerText = (t.workers?.length ? t.workers.join(', ') : (card.workers ?? []).join(', ')) || '-';
+                            const dateText = t.completionDate || card.completedDate || card.confirmedDate;
+                            return (
+                              <div key={t.tankDetailId} className="rounded-lg border border-gray-100 bg-gray-50 p-2 space-y-0.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-gray-800 truncate">{t.label} • {t.tankSize || '-'}</span>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${statusPillClass(phaseStatus)}`}>{phaseStatus}</span>
+                                </div>
+                                <div className="text-gray-500 truncate">Item: <span className="text-gray-700">{t.itemDescription || '-'}</span></div>
+                                <div className="text-gray-500">Type: <span className="text-gray-700">{t.tankType || '-'}</span></div>
+                                {showWorkerDate && (
+                                  <div className="text-gray-500 truncate">
+                                    Workers: <span className="text-gray-700">{workerText}</span>{dateText ? <span className="text-gray-400"> · {dateText}</span> : ''}
+                                  </div>
+                                )}
+                                <div className="text-gray-500 truncate">Remarks: <span className="text-gray-700">{t.remarks || '-'}</span></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={col.key} className="text-[10px] leading-4 text-gray-700 truncate min-w-0">
+                    {isWo ? (
+                      <span className="inline-flex items-center gap-1">
+                        {showDot && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />}
+                        <span className="font-semibold text-gray-800 truncate">{value}</span>
+                        {card.isEmergency && <ArrowUp className="w-3 h-3 text-red-500 flex-shrink-0" />}
+                      </span>
+                    ) : col.key === 'payment' ? (
+                      <span className="font-bold" style={{ color: pColor(payPct) }}>{value}</span>
+                    ) : (
+                      value
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           {tipPos && (
-            <div style={{position:'fixed',left:tipPos.x+12,top:tipPos.y+16,zIndex:9999,backgroundColor:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'6px 10px',fontSize:11,color:'#374151',boxShadow:'0 4px 12px rgba(0,0,0,0.12)',pointerEvents:'none',whiteSpace:'nowrap',minWidth:140}}>
-              <div style={{fontWeight:700,fontSize:12,color:'#111827',marginBottom:3}}>WO: {woCode}</div>
-              {card.brand && <div style={{marginBottom:1}}>Brand: <b>{card.brand}</b></div>}
-              {card.tankSize && <div style={{marginBottom:1}}>Tank: <b>{card.tankSize}</b></div>}
-              {card.location && <div style={{marginBottom:1}}>Location: {card.location}</div>}
-              {statusText && <div style={{color:'#4f46e5',marginBottom:1}}>{statusText}</div>}
-              <div style={{color:pColor(payPct),fontWeight:700,marginTop:2}}>Payment: {payPct}%</div>
+            <div style={{position:'fixed',left:tipPos.x+12,top:tipPos.y+16,zIndex:9999,backgroundColor:'white',border:'1px solid #e5e7eb',borderRadius:8,padding:'6px 10px',fontSize:11,color:'#374151',boxShadow:'0 4px 12px rgba(0,0,0,0.12)',pointerEvents:'none',minWidth:180}}>
+              <div style={{fontWeight:700,fontSize:12,color:'#111827',marginBottom:3,whiteSpace:'nowrap'}}>WO: {woCode}</div>
+              {card.brand && <div style={{marginBottom:1,whiteSpace:'nowrap'}}>Brand: <b>{card.brand}</b></div>}
+              {card.tankSize && <div style={{marginBottom:1,whiteSpace:'nowrap'}}>Tank Size: <b>{card.tankSize}</b></div>}
+              {(card.tanks ?? []).length > 0 && <div style={{marginBottom:1,whiteSpace:'nowrap'}}>Tanks: <b>{(card.tanks ?? []).length}</b></div>}
+              {card.customer && <div style={{marginBottom:1,whiteSpace:'nowrap'}}>Customer: {card.customer}</div>}
+              {card.location && <div style={{marginBottom:1,whiteSpace:'nowrap'}}>Location: {card.location}</div>}
+              {statusText && <div style={{color:'#4f46e5',marginBottom:1,whiteSpace:'nowrap'}}>{statusText}</div>}
+              <div style={{color:pColor(payPct),fontWeight:700,marginTop:2,whiteSpace:'nowrap'}}>Payment: {payPct}%</div>
+              {phase === 'installation' && (
+                <div style={{marginTop:5,paddingTop:5,borderTop:'1px solid #f3f4f6'}}>
+                  <div style={{fontSize:9,fontWeight:700,color:'#6b7280',textTransform:'uppercase',letterSpacing:0.3,marginBottom:3}}>Progress</div>
+                  <div style={{display:'flex',gap:2}}>
+                    {getCardGanttDays(card).map(seg => (
+                      <span key={seg.key} title={seg.date} style={{width:9,height:14,borderRadius:2,backgroundColor:seg.color,flexShrink:0}} />
+                    ))}
+                  </div>
+                  <div style={{display:'flex',gap:8,marginTop:3,fontSize:9,color:'#6b7280'}}>
+                    <span><span style={{display:'inline-block',width:7,height:7,borderRadius:2,backgroundColor:'#22c55e',marginRight:3}} />In progress</span>
+                    <span><span style={{display:'inline-block',width:7,height:7,borderRadius:2,backgroundColor:'#ef4444',marginRight:3}} />Pending</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>
       )}
     </Draggable>
+  );
+}
+
+function MatrixColumnHeader({ listId, phase, onExpand }: { listId: string; phase: SchedulePhase; onExpand?: () => void }) {
+  const columns = getMatrixColumns(listId, phase);
+  const gridTemplateColumns = getMatrixTemplateColumns(columns);
+  return (
+    <div className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50 relative">
+      {onExpand && (
+        <button
+          onClick={onExpand}
+          title="Expand to fullscreen"
+          className="absolute top-1 right-1 z-20 p-0.5 rounded-md bg-white border border-gray-200 text-gray-400 hover:text-purple-600 hover:border-purple-300 shadow-sm"
+        >
+          <Maximize2 className="w-3 h-3" />
+        </button>
+      )}
+      <div className="grid gap-1.5 px-2 py-1.5 items-start" style={{ gridTemplateColumns }}>
+        {columns.map(col => (
+          <div key={col.key} className="text-[9px] font-bold text-gray-500 uppercase tracking-wide leading-[1.1] break-words">{col.label}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const MATRIX_LIST_TITLES: Record<string, string> = {
+  'pending-delivery': 'Pending Delivery',
+  'status-delivery': 'Delivery Status',
+  'planning-delivery': 'Planning Delivery',
+  'pending-installation': 'Pending Installation',
+  'status-installation': 'Installation Status',
+  'planning-installation': 'Planning Installation',
+};
+
+/* ─── Fullscreen expand modal for the 6 schedule matrix boxes ─────────────── */
+function MatrixFullscreenModal({ listId, phase, cards, onOpenCard, onClose }: {
+  listId: string; phase: SchedulePhase; cards: ScCard[]; onOpenCard: (card: ScCard) => void; onClose: () => void;
+}) {
+  const isDelivery = phase === 'delivery';
+  const title = MATRIX_LIST_TITLES[listId] || listId;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full h-full max-w-none flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className={`flex items-center justify-between px-5 py-3 text-white flex-shrink-0 ${isDelivery ? 'bg-gradient-to-r from-amber-600 to-amber-500' : 'bg-gradient-to-r from-indigo-600 to-indigo-500'}`}>
+          <div>
+            <h2 className="text-base font-bold">{title}</h2>
+            <p className="text-xs opacity-80">{cards.length} work order{cards.length !== 1 ? 's' : ''} · click a row to open card details</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-4">
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-gray-100 text-gray-600 uppercase text-[10px] tracking-wide">
+                <th className="border border-gray-200 px-2 py-2 text-left">WO No</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">Customer</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">Brand</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">Location</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">Tank Size</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">Type</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Del. Date' : 'Inst. Start'}</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Del. Start' : 'Inst. Start Status'}</th>
+                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Delivery Status' : 'Installation Status'}</th>
+                {!isDelivery && <th className="border border-gray-200 px-2 py-2 text-left">Workers</th>}
+                <th className="border border-gray-200 px-2 py-2 text-left">Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cards.length === 0 && (
+                <tr>
+                  <td colSpan={isDelivery ? 10 : 11} className="border border-gray-200 px-2 py-6 text-center text-gray-300 italic">No cards</td>
+                </tr>
+              )}
+              {cards.map((card, cardIdx) => {
+                const tanks = (card.tanks?.length ? card.tanks : [{
+                  tankDetailId: 'base',
+                  label: 'T1',
+                  tankSize: card.tankSize || '-',
+                  itemDescription: '',
+                  tankType: '' as ScTankProgress['tankType'],
+                  remarks: card.sectionRemarks || '',
+                  deliveryStatus: (card.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
+                  installationStatus: (card.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
+                  workers: card.workers ?? [],
+                  completionDate: undefined,
+                }]);
+                const rowBg = cardIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50';
+                return tanks.map((t, i) => {
+                  const phaseStatus = isDelivery ? t.deliveryStatus : t.installationStatus;
+                  const phaseStatusText = isDelivery
+                    ? (t.deliveryStatusText || card.deliveryStatus || '-')
+                    : (t.installationStatusText || card.installationStatus || '-');
+                  return (
+                    <tr key={`${card.id}-${t.tankDetailId}`} onClick={() => onOpenCard(card)} className={`${rowBg} hover:bg-purple-50 cursor-pointer`}>
+                      {i === 0 && (
+                        <>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top font-semibold text-gray-800">{normalizeWoCode(card.woCode)}</td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.customer || '-'}</td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.brand || '-'}</td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.location || '-'}</td>
+                        </>
+                      )}
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.tankSize || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.tankType || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-500">{t.completionDate || '-'}</td>
+                      <td className={`border border-gray-200 px-2 py-2 font-semibold ${tankStatusColorClass(phaseStatus)}`}>{phaseStatus}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{phaseStatusText}</td>
+                      {!isDelivery && <td className="border border-gray-200 px-2 py-2 text-gray-700">{(t.workers?.length ? t.workers : (card.workers ?? [])).join(', ') || '-'}</td>}
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.remarks || '-'}</td>
+                    </tr>
+                  );
+                });
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -602,6 +1134,7 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
 
   const isDateList = listId.startsWith('delivery-') || listId.startsWith('installation-');
   const isDel = listId.startsWith('delivery-');
+  const currentPhase: SchedulePhase = getPhaseForListId(listId);
   const isInstallationCard = listId.startsWith('installation-') || listId === 'pending-installation';
   const isDelayedNow = isCardCurrentlyDelayed(ec);
   const dk = isDateList ? listId.replace(/^(delivery|installation)-/, '') : null;
@@ -660,6 +1193,32 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
     { label: 'Sales Person',   value: ec.salesPerson || '—' },
   ];
 
+  const getEditableTanks = (cardState: ScCard): ScTankProgress[] => {
+    if ((cardState.tanks ?? []).length > 0) return cardState.tanks ?? [];
+    return [{
+      tankDetailId: 'base',
+      label: 'T1',
+      tankSize: cardState.tankSize || '-',
+      itemDescription: '',
+      tankType: '',
+      remarks: '',
+      deliveryStatus: (cardState.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
+      installationStatus: (cardState.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
+      workers: cardState.workers ?? [],
+      completionDate: cardState.completedDate || cardState.confirmedDate,
+    }];
+  };
+
+  const updateTank = (tankDetailId: string, updater: (tank: ScTankProgress) => ScTankProgress) => {
+    setEc(prev => {
+      const source = getEditableTanks(prev);
+      const tanks = source.map(t => t.tankDetailId === tankDetailId ? updater(t) : t);
+      return { ...prev, tanks };
+    });
+  };
+
+  const editableTanks = getEditableTanks(ec);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col overflow-hidden" style={{ maxWidth: '780px', maxHeight: '90vh' }}>
@@ -707,30 +1266,97 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
             ))}
           </div>
 
-          {(ec.tankLabel || ec.tankSize) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Tank Reference</div>
-                <div className="text-sm font-semibold text-gray-800">{ec.tankLabel ? `${ec.woCode} (${ec.tankLabel})` : ec.woCode}</div>
-                {ec.tankSize && <div className="text-xs text-gray-500 mt-0.5">{ec.tankSize}</div>}
-              </div>
-              {canEdit && ec.sourceCardId && ec.tankDetailId && (
-                <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Tank Stack</div>
-                    <div className="text-sm font-semibold text-gray-800">{ec.tankGroupLocked ? 'Locked together' : 'Unlocked'}</div>
-                    <div className="text-xs text-gray-500">Locked tanks move as one stack.</div>
-                  </div>
-                  <button
-                    onClick={() => setEc(prev => ({ ...prev, tankGroupLocked: !prev.tankGroupLocked }))}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${ec.tankGroupLocked ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}
-                  >
-                    {ec.tankGroupLocked ? 'Unlock' : 'Lock'}
-                  </button>
-                </div>
-              )}
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700">Tank-Level Progress</span>
+              <span className="text-[10px] font-semibold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">{editableTanks.length} tanks</span>
             </div>
-          )}
+            <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+              {editableTanks.map(tank => (
+                <div key={tank.tankDetailId} className="flex flex-col gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="font-bold text-gray-800 whitespace-nowrap">{tank.label} • {tank.tankSize || '-'}</span>
+                    <span className="h-4 w-px bg-gray-200 flex-shrink-0" />
+                    <span className="truncate text-gray-600"><span className="text-gray-400">Item:</span> {tank.itemDescription || '-'}</span>
+                    <span className="truncate text-gray-600"><span className="text-gray-400">Type:</span> {tank.tankType || '-'}</span>
+                  </div>
+                  <div className="text-xs text-gray-600 break-words">
+                    <span className="text-gray-400">Remarks:</span> {tank.remarks || '-'}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">
+                      {currentPhase === 'delivery' ? 'Delivery Status' : 'Installation Status'}
+                    </span>
+                    <input
+                      type="text"
+                      value={(currentPhase === 'delivery' ? tank.deliveryStatusText : tank.installationStatusText) || ''}
+                      disabled={isReadOnly}
+                      onChange={e => {
+                        const text = e.target.value;
+                        updateTank(tank.tankDetailId, prev => (
+                          currentPhase === 'delivery'
+                            ? { ...prev, deliveryStatusText: text }
+                            : { ...prev, installationStatusText: text }
+                        ));
+                      }}
+                      placeholder={currentPhase === 'delivery' ? 'Write delivery status' : 'Write installation status'}
+                      className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded-md text-xs bg-white text-gray-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">
+                      {currentPhase === 'delivery' ? 'Del. Start' : 'Inst. Start'}
+                    </span>
+                    {currentPhase === 'delivery' ? (
+                      <select
+                        value={tank.deliveryStatus}
+                        disabled={isReadOnly}
+                        onChange={e => {
+                          const newStatus = e.target.value as ScTankProgress['deliveryStatus'];
+                          updateTank(tank.tankDetailId, prev => ({
+                            ...prev,
+                            deliveryStatus: newStatus,
+                            // Stamp today's date whenever the tank progresses past "Not
+                            // Delivered"; once Completed, the date is frozen and never changes again.
+                            completionDate: prev.deliveryStatus === 'Completed'
+                              ? prev.completionDate
+                              : (newStatus === 'Not Delivered' ? prev.completionDate : referenceDate),
+                          }));
+                        }}
+                        className={`flex-shrink-0 px-2 py-1 border rounded-md text-xs font-semibold ${tankStatusColorClass(tank.deliveryStatus)}`}
+                      >
+                        <option value="Not Delivered">Not Delivered</option>
+                        <option value="Partially Delivered">Partially Delivered</option>
+                        <option value="Completed">Completed</option>
+                      </select>
+                    ) : (
+                      <select
+                        value={tank.installationStatus}
+                        disabled={isReadOnly}
+                        onChange={e => {
+                          const newStatus = e.target.value as ScTankProgress['installationStatus'];
+                          updateTank(tank.tankDetailId, prev => ({
+                            ...prev,
+                            installationStatus: newStatus,
+                            // Stamp today's date whenever the tank progresses past "Not
+                            // Started"; once Completed, the date is frozen and never changes again.
+                            completionDate: prev.installationStatus === 'Completed'
+                              ? prev.completionDate
+                              : (newStatus === 'Not Started' ? prev.completionDate : referenceDate),
+                          }));
+                        }}
+                        className={`flex-shrink-0 px-2 py-1 border rounded-md text-xs font-semibold ${tankStatusColorClass(tank.installationStatus)}`}
+                      >
+                        <option value="Not Started">Not Started</option>
+                        <option value="Partially Installed">Partially Installed</option>
+                        <option value="Completed">Completed</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Payment + Workers — side by side */}
           <div className="grid grid-cols-2 gap-3">
@@ -786,58 +1412,32 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
             </div>
           </div>
 
-          {/* Installation status + delay (installation cards only) */}
-          {(isDel || listId === 'pending-delivery') && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <label className="block text-xs font-semibold text-amber-700 mb-1.5">Delivery Status</label>
-              <input
-                value={ec.deliveryStatus || ''}
-                  disabled={isReadOnly}
-                onChange={e => setEc(p => ({ ...p, deliveryStatus: e.target.value || undefined }))}
-                placeholder="Current delivery status"
-                className="w-full px-2.5 py-1.5 border border-amber-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-              />
-            </div>
-          )}
-
-          {/* Installation status + delay (installation cards only) */}
+          {/* Delay state (installation cards only) — per-tank status/remarks now live in Tank-Level Progress above */}
           {isInstallationCard && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
-                <label className="block text-xs font-semibold text-indigo-700 mb-1.5">Installation Status</label>
-                <input
-                  value={ec.installationStatus || ''}
-                  disabled={isReadOnly}
-                  onChange={e => setEc(p => ({ ...p, installationStatus: e.target.value || undefined }))}
-                  placeholder="Current installation status"
-                  className="w-full px-2.5 py-1.5 border border-indigo-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                />
-              </div>
-              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-gray-700 mb-0.5">Delay State</div>
-                  <div className={`text-xs font-bold ${isDelayedNow ? 'text-red-600' : 'text-green-600'}`}>
-                    {isDelayedNow ? '⚠ Delayed' : '✓ On Track'}
-                  </div>
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-semibold text-gray-700 mb-0.5">Delay State</div>
+                <div className={`text-xs font-bold ${isDelayedNow ? 'text-red-600' : 'text-green-600'}`}>
+                  {isDelayedNow ? '⚠ Delayed' : '✓ On Track'}
                 </div>
-                <button
-                  disabled={isReadOnly}
-                  onClick={() => setEc(prev => {
-                    const today = referenceDate;
-                    if (isCardCurrentlyDelayed(prev)) {
-                      const periods = [...(prev.delayPeriods ?? [])];
-                      for (let i = periods.length - 1; i >= 0; i -= 1) {
-                        if (!periods[i].endDate) { periods[i] = { ...periods[i], endDate: today }; break; }
-                      }
-                      return { ...prev, delayPeriods: periods };
-                    }
-                    return { ...prev, delayPeriods: [...(prev.delayPeriods ?? []), { startDate: today }] };
-                  })}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {isDelayedNow ? 'Set On Track' : 'Mark Delayed'}
-                </button>
               </div>
+              <button
+                disabled={isReadOnly}
+                onClick={() => setEc(prev => {
+                  const today = referenceDate;
+                  if (isCardCurrentlyDelayed(prev)) {
+                    const periods = [...(prev.delayPeriods ?? [])];
+                    for (let i = periods.length - 1; i >= 0; i -= 1) {
+                      if (!periods[i].endDate) { periods[i] = { ...periods[i], endDate: today }; break; }
+                    }
+                    return { ...prev, delayPeriods: periods };
+                  }
+                  return { ...prev, delayPeriods: [...(prev.delayPeriods ?? []), { startDate: today }] };
+                })}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${isDelayedNow ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} ${isReadOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {isDelayedNow ? 'Set On Track' : 'Mark Delayed'}
+              </button>
             </div>
           )}
 
@@ -1003,65 +1603,71 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
 
             {/* New remark composer */}
             {canEdit && (
-            <div className="flex items-start gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0 mt-0.5">
-                {remarkAuthor ? remarkAuthor.charAt(0).toUpperCase() : '+'}
-              </div>
-              <div className="flex-1 min-w-0 border border-gray-200 rounded-2xl rounded-tl-sm bg-white overflow-hidden focus-within:ring-2 focus-within:ring-purple-400 focus-within:border-purple-300">
-                <input
-                  value={remarkAuthor}
-                  onChange={e => setRemarkAuthor(e.target.value)}
-                  placeholder="Your name"
-                  className="w-full px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-700 placeholder-gray-400 focus:outline-none border-b border-gray-100"
-                />
-                <textarea
-                  value={remarkText}
-                  onChange={e => setRemarkText(e.target.value)}
-                  placeholder="Write a remark…"
-                  rows={2}
-                  className="w-full px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none placeholder-gray-400"
-                />
-                <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-gray-100 gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer hover:text-purple-600 transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                    {remarkMedia.length > 0 ? `${remarkMedia.length} file(s)` : 'Attach'}
-                    <input type="file" accept="image/*,video/*" multiple className="hidden"
-                      onChange={e => { const files = Array.from(e.target.files ?? []); files.forEach(addMedia); e.currentTarget.value = ''; }} />
-                  </label>
+              <div className="flex items-start gap-2.5">
+                <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0 mt-0.5">
+                  {remarkAuthor ? remarkAuthor.charAt(0).toUpperCase() : '+'}
+                </div>
+                <div className="flex-1 min-w-0 border border-gray-200 rounded-2xl rounded-tl-sm bg-white overflow-hidden focus-within:ring-2 focus-within:ring-purple-400 focus-within:border-purple-300">
+                  <input
+                    value={remarkAuthor}
+                    onChange={e => setRemarkAuthor(e.target.value)}
+                    placeholder="Your name"
+                    className="w-full px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-700 placeholder-gray-400 focus:outline-none border-b border-gray-100"
+                  />
+                  <textarea
+                    value={remarkText}
+                    onChange={e => setRemarkText(e.target.value)}
+                    placeholder="Write a remark…"
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none placeholder-gray-400"
+                  />
+                  <div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-gray-100 gap-2">
+                    <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer hover:text-purple-600 transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828L18 9.828a4 4 0 10-5.656-5.656L5.757 10.76a6 6 0 108.486 8.486L20 13" />
+                      </svg>
+                      Attach
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,video/*"
+                        className="hidden"
+                        onChange={e => {
+                          const files = Array.from(e.target.files || []);
+                          files.forEach(addMedia);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                    <button onClick={addRemark} className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700">
+                      Add Remark
+                    </button>
+                  </div>
                   {remarkMedia.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="px-3 pb-2.5 grid grid-cols-3 gap-2 border-t border-gray-100">
                       {remarkMedia.map(m => (
-                        <span key={m.id} className="flex items-center gap-1 px-1.5 py-0.5 bg-purple-50 border border-purple-200 rounded-full text-[10px] text-purple-700">
-                          {m.name.length > 12 ? m.name.slice(0, 12) + '…' : m.name}
-                          <button onClick={() => setRemarkMedia(prev => prev.filter(x => x.id !== m.id))} className="text-purple-400 hover:text-red-500">×</button>
-                        </span>
+                        <div key={m.id} className="text-[10px] text-gray-500 truncate">{m.name}</div>
                       ))}
                     </div>
                   )}
-                  <button
-                    onClick={addRemark}
-                    className="ml-auto px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 shrink-0"
-                  >
-                    Post
-                  </button>
                 </div>
               </div>
-            </div>
             )}
           </div>
         </div>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
-            {canEdit ? 'Cancel' : 'Close'}
+        <div className="px-6 py-4 border-t border-gray-100 flex gap-2.5 flex-shrink-0">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50">
+            Cancel
           </button>
-          {canEdit && (
+          {!isReadOnly && (
             <button
-              onClick={() => { onSave(ec, targetListId); onClose(); }}
-              className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 transition-colors"
+              onClick={() => {
+                onSave(ec, targetListId);
+                onClose();
+              }}
+              className="flex-1 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700"
             >
               Save Changes
             </button>
@@ -1072,25 +1678,24 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
   );
 }
 
-/* ─── Main ScheduleBoard ─────────────────────────────────────────────────── */
-
-interface Props {
-  userName: string; userDepartment?: string; userRole: 'admin'|'user';
-  onChannelSwitch?: (ch: ChannelType) => void; accessibleChannels?: ChannelType[];
-}
-
-const NUM_COLS = 8;
-const INSTALLATION_COLS = 9;
+type Props = {
+  userName: string;
+  userDepartment?: string;
+  userRole?: string;
+  onChannelSwitch?: (ch: ChannelType) => void;
+  accessibleChannels?: ChannelType[];
+};
 
 export default function ScheduleBoard({ userName, userDepartment, userRole, onChannelSwitch, accessibleChannels=[] }: Props) {
   const [store, setStore]           = useState<ScStore>(EMPTY_STORE);
-  const [referenceDate, setReferenceDate] = useState<string>(dateKey());
+  const [referenceDate] = useState<string>(dateKey());
+  const [searchDate, setSearchDate] = useState<string>('');
   const [delOff,  setDelOff]        = useState(-2);
-  // Default installation window: 5 past days, today, 3 future days.
   const [instOff, setInstOff]       = useState(-5);
   const [ganttDW, setGanttDW]       = useState(72);
   const [addCardType, setAddCardType] = useState<'delivery'|'installation'|null>(null);
   const [selected, setSelected]     = useState<{card:ScCard;listId:string}|null>(null);
+  const [expandedList, setExpandedList] = useState<{listId:string; phase:SchedulePhase}|null>(null);
   const [pendingDrop, setPendingDrop] = useState<{srcId:string;dstId:string;cardId:string;dstIdx:number}|null>(null);
   const [showChDrop, setShowChDrop] = useState(false);
   const [pendFilter, setPendFilter] = useState<'all'|'delivery'|'installation'>('all');
@@ -1103,13 +1708,18 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const [pendingDetailsError, setPendingDetailsError] = useState('');
   const [isGeneratingReports, setIsGeneratingReports] = useState(false);
 
-  const canEditSchedule = userRole === 'admin' || userDepartment === 'Delivery & Installation';
+  const canEditSchedule = (userRole === 'admin' || userDepartment === 'Delivery & Installation') && !searchDate;
 
   const ganttRef   = useRef<HTMLDivElement>(null);
   const delRef     = useRef<HTMLDivElement>(null);
   const instRef    = useRef<HTMLDivElement>(null);
   const chDropRef  = useRef<HTMLDivElement>(null);
   const ganttAutoFitRef = useRef(true);
+  // Sentinel (not a real date) forces the daily-reset effect to run once the
+  // schedule store finishes loading, even on a fresh page reload where
+  // `referenceDate` is initialized directly to "today" — otherwise stranded
+  // completed cards from a previous day never get archived/reset.
+  const lastProcessedReferenceDateRef = useRef<string>('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workOrderCardsRef = useRef<WorkOrderCard[]>([]);
   const syncedSignatureRef = useRef<Record<string, string>>({});
@@ -1117,6 +1727,15 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const instDragRef = useRef<{ startX: number; startOff: number } | null>(null);
 
   const getSyncSignature = (sc: ScCard) => {
+    const tankSig = (sc.tanks ?? [])
+      .map(t => [
+        t.tankDetailId,
+        t.deliveryStatus,
+        t.installationStatus,
+        (t.workers ?? []).join(','),
+        t.completionDate ?? '',
+      ].join(':'))
+      .join('|');
     // scheduleType intentionally excluded — Work Order is the authority for type;
     // we only sync stage/payment/confirmation status back.
     return [
@@ -1126,7 +1745,9 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       sc.confirmedDate ?? '',
       sc.completedDate ?? '',
       sc.returnedFromDate ?? '',
+      sc.deliveryStatus ?? '',
       sc.installationStatus ?? '',
+      tankSig,
     ].join('|');
   };
 
@@ -1238,11 +1859,11 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     try {
       const wo = await fetchCards('Work Order');
       setWorkOrderCards(wo);
-      setStore(prev => mergeScheduleWithWorkOrder(prev, wo));
+      setStore(prev => mergeScheduleWithWorkOrder(prev, wo, referenceDate));
     } catch {
       // Ignore intermittent fetch failures during polling.
     }
-  }, []);
+  }, [referenceDate]);
 
   /* load schedule store and merge with Work Order Delivery/Installation cards */
   useEffect(() => {
@@ -1255,7 +1876,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         ]);
         if (!scheduleRes.ok) throw new Error(`Failed to load schedule data (${scheduleRes.status})`);
         const body = await scheduleRes.json() as { store?: unknown };
-        const merged = mergeScheduleWithWorkOrder(normalizeStore(body.store), woCards);
+        const merged = mergeScheduleWithWorkOrder(normalizeStore(body.store), woCards, referenceDate);
         if (active) {
           setWorkOrderCards(woCards);
           setStore(merged);
@@ -1267,7 +1888,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       }
     })();
     return () => { active = false; };
-  }, []);
+  }, [referenceDate]);
 
   // Keep Schedule linked with Work Order Delivery/Installation in near real-time.
   useEffect(() => {
@@ -1303,27 +1924,90 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h);
   },[]);
 
-  /* auto-return unconfirmed past cards to pending */
+  /* daily reset: status/planning -> pending with completion guards */
   useEffect(()=>{
     if (!scheduleLoaded) return;
-    const today=startOfDay(parseISO(referenceDate));
+    if (lastProcessedReferenceDateRef.current === referenceDate) return;
+    lastProcessedReferenceDateRef.current = referenceDate;
     setStore(prev=>{
-      const next:ScStore=JSON.parse(JSON.stringify(prev)); let dirty=false;
-      Object.keys(next).forEach(lid=>{
-        const isD=lid.startsWith('delivery-'); const isI=lid.startsWith('installation-');
-        if(!isD&&!isI)return;
-        const dk=lid.replace(/^(delivery|installation)-/,'');
-        if(!isBefore(startOfDay(parseISO(dk)),today))return;
-        const unconf=next[lid].filter(c=>!c.isConfirmed); if(!unconf.length)return;
-        const pKey=isD?'pending-delivery':'pending-installation';
-        if(!next[pKey])next[pKey]=[];
-        unconf.forEach(card=>{
-          if(!next[pKey].some(c=>normalizeWoCode(c.woCode)===normalizeWoCode(card.woCode)&&c.returnedFromDate===dk)){
-            next[pKey]=[{...card,id:`${card.id}-ret`,listId:pKey,returnedFromDate:dk,isConfirmed:false},...next[pKey]];
-            dirty=true;
-          }});
-        next[lid]=next[lid].filter(c=>c.isConfirmed); dirty=true;
-      }); return dirty?next:prev;
+      const next:ScStore=JSON.parse(JSON.stringify(prev));
+      let dirty=false;
+
+      const resetPhase = (phase: SchedulePhase) => {
+        const pendingId = getPendingListForPhase(phase);
+        const phaseListIds = Object.keys(next).filter(listId => listId.endsWith(`-${phase}`));
+        const sourceIds = phaseListIds.filter(listId => listId !== pendingId);
+        const pendingRaw = [...(next[pendingId] ?? [])];
+        const pending = pendingRaw.filter(card => !isCardCompleteForPhase(card, phase));
+        const sourceCards = sourceIds.flatMap(listId => next[listId] ?? []);
+        const carry = sourceCards.filter(card => !isCardCompleteForPhase(card, phase));
+        const completed = [...pendingRaw, ...sourceCards].filter(card => isCardCompleteForPhase(card, phase));
+        const byIdentity = new Set<string>();
+
+        // Keep existing pending cards first (dedup by identity)
+        const dedupedPending: ScCard[] = [];
+        pending.forEach(card => {
+          const identity = getCardIdentity(card);
+          if (byIdentity.has(identity)) return;
+          byIdentity.add(identity);
+          dedupedPending.push(card);
+        });
+
+        carry.forEach(card => {
+          const identity = getCardIdentity(card);
+          if (byIdentity.has(identity)) return;
+          byIdentity.add(identity);
+          dedupedPending.unshift({
+            ...card,
+            listId: pendingId,
+            returnedFromDate: referenceDate,
+            isConfirmed: false,
+            confirmedDate: undefined,
+          });
+          dirty = true;
+        });
+
+        if ((next[pendingId] ?? []).length !== dedupedPending.length) dirty = true;
+        next[pendingId] = dedupedPending;
+
+        if (completed.length > 0) {
+          const archive = [...(next[ARCHIVE_COMPLETED] ?? [])];
+          const archiveByIdentity = new Map<string, number>();
+          archive.forEach((card, idx) => {
+            archiveByIdentity.set(getCardIdentity(card), idx);
+          });
+          completed.forEach(card => {
+            const identity = getCardIdentity(card);
+            const archivedCard: ScCard = {
+              ...card,
+              listId: ARCHIVE_COMPLETED,
+              // Stamp "now" so mergeScheduleWithWorkOrder's bounce-back guard can
+              // reliably tell that this card was archived after the last known
+              // Work Order update, preventing the DB-synced card from
+              // resurrecting it back into an active list.
+              updatedAt: new Date().toISOString(),
+              sectionRemarks: card.sectionRemarks || ((card.workers ?? []).length ? `Last workers: ${(card.workers ?? []).join(', ')}` : card.sectionRemarks),
+            };
+            const existingIdx = archiveByIdentity.get(identity);
+            if (typeof existingIdx === 'number') {
+              archive[existingIdx] = archivedCard;
+            } else {
+              archive.unshift(archivedCard);
+            }
+          });
+          next[ARCHIVE_COMPLETED] = archive;
+          dirty = true;
+        }
+
+        sourceIds.forEach(listId => {
+          if ((next[listId] ?? []).length > 0) dirty = true;
+          next[listId] = [];
+        });
+      };
+
+      resetPhase('delivery');
+      resetPhase('installation');
+      return dirty ? next : prev;
     });
   },[scheduleLoaded, referenceDate]);
 
@@ -1430,19 +2114,15 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     setStore(prev=>{
       const next={...prev}; const srcList=[...(next[srcId]??[])]; const card=srcList.find(c=>c.id===cardId);
       if(!card)return prev;
-      const groupedCards = card.tankGroupLocked && card.sourceCardId
-        ? Object.values(next).flat().filter(c => String(c.sourceCardId) === String(card.sourceCardId) && c.tankGroupLocked)
-        : [card];
-
       Object.keys(next).forEach(listId => {
-        next[listId] = (next[listId] ?? []).filter(c => !groupedCards.some(grouped => grouped.id === c.id));
+        next[listId] = (next[listId] ?? []).filter(c => c.id !== card.id);
       });
 
-      const movedCards = groupedCards.map(grouped => ({
-        ...grouped,
+      const movedCards = [{
+        ...card,
         listId: dstId,
-        workers: workers ?? grouped.workers,
-      }));
+        workers: workers ?? card.workers,
+      }];
 
       movedForSync = movedCards[0] ?? null;
       const dstList=[...(next[dstId]??[])];
@@ -1458,41 +2138,113 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     if(!destination)return;
     const{droppableId:srcId,index:srcIdx}=source; const{droppableId:dstId,index:dstIdx}=destination;
     if(srcId===dstId&&srcIdx===dstIdx)return;
-    const srcDP=srcId==='pending-delivery'; const srcIP=srcId==='pending-installation';
-    const srcDD=srcId.startsWith('delivery-'); const srcID=srcId.startsWith('installation-');
-    const dstDD=dstId.startsWith('delivery-'); const dstID=dstId.startsWith('installation-');
-    if((srcDP||srcDD)&&dstID){alert('⛔ Delivery cards can only go to Delivery columns.');return;}
-    if((srcIP||srcID)&&dstDD){alert('⛔ Installation cards can only go to Installation columns.');return;}
-    if(dstDD||dstID){
-      const dk=dstId.replace(/^(delivery|installation)-/, '');
-      const today=startOfDay(parseISO(referenceDate));
-      const dstDay=startOfDay(parseISO(dk));
-      if(isBefore(dstDay,today)){
-        alert('⛔ Cannot place cards on past dates. Choose current date or a future date.');
-        return;
-      }
+    if(getPhaseForListId(srcId)!==getPhaseForListId(dstId)){
+      alert('⛔ Delivery and Installation cards cannot be mixed.');
+      return;
     }
-    if(dstDD||dstID){
-      const dk=dstId.replace(/^(delivery|installation)-/,'');
-      if(isSunday(parseISO(dk))&&!window.confirm(`⚠️ ${format(parseISO(dk),'EEEE, MMM d')} is Sunday.\nContinue?`))return;
-    }
-    if((srcDP&&dstDD)||(srcIP&&dstID)){setPendingDrop({srcId,dstId,cardId:draggableId,dstIdx});return;}
     performMove(srcId,dstId,draggableId,dstIdx);
-  },[performMove, canEditSchedule, referenceDate]);
+  },[performMove, canEditSchedule]);
 
-  const getCards=(lid:string)=>store[lid]??[];
+  const displayStore = useMemo(
+    () => (searchDate ? buildHistoricalStore(store, searchDate) : store),
+    [store, searchDate]
+  );
+  const getCards=(lid:string)=>displayStore[lid]??[];
   const woQuery = woSearch.trim().toLowerCase();
   const matchesWo = useCallback((card: ScCard)=>{
     if(!woQuery) return true;
     return normalizeWoCode(card.woCode).toLowerCase().includes(woQuery);
   }, [woQuery]);
 
+  const upsertScheduleCard = useCallback((nextCard: ScCard, listId: string) => {
+    setStore(prev => {
+      const next: ScStore = { ...prev };
+      Object.keys(next).forEach(key => {
+        next[key] = (next[key] ?? []).filter(card => card.id !== nextCard.id);
+      });
+      next[listId] = [{ ...nextCard, listId }, ...(next[listId] ?? [])];
+      return next;
+    });
+    void syncScheduleCardToWorkOrder({ ...nextCard, listId });
+  }, [syncScheduleCardToWorkOrder]);
+
+  const renderDragClone = (provided: any, snapshot: any, rubric: any) => {
+    const listId = rubric.source.droppableId as string;
+    const card = getCards(listId)[rubric.source.index];
+    return (
+      <div
+        ref={provided.innerRef}
+        {...provided.draggableProps}
+        {...provided.dragHandleProps}
+        className="rounded-lg border-2 px-3 py-1.5 bg-white shadow-xl"
+        style={{ ...provided.draggableProps.style, borderColor: '#7c3aed' }}
+      >
+        <span className="text-xs font-bold text-purple-700">{normalizeWoCode(card?.woCode || '')}</span>
+      </div>
+    );
+  };
+
+  const renderMatrixSection = (listId: string, phase: SchedulePhase) => {
+    const cards = sortScheduleGroup(getCards(listId).filter(matchesWo));
+    return (
+      <div className="flex flex-col min-h-0 border-r border-b border-gray-200 last:border-r-0 bg-white">
+        <MatrixColumnHeader listId={listId} phase={phase} onExpand={() => setExpandedList({ listId, phase })} />
+        <Droppable droppableId={listId} direction="vertical" renderClone={renderDragClone}>
+          {(prov, snap)=>(
+            <div ref={prov.innerRef} {...prov.droppableProps} className={`flex-1 overflow-y-auto scrollbar-hide p-1.5 space-y-0.5 transition-colors ${snap.isDraggingOver?'bg-purple-50/70':''}`}>
+              {cards.length === 0 && !snap.isDraggingOver && (
+                <p className="text-[10px] text-gray-300 text-center italic mt-2 select-none">No cards</p>
+              )}
+              {cards.map((c,i)=>(
+                <CardChip
+                  key={c.id}
+                  card={c}
+                  listId={listId}
+                  index={i}
+                  isPending
+                  isDragDisabled={!canEditSchedule}
+                  onOpen={()=>setSelected({card:c,listId})}
+                />
+              ))}
+              {prov.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </div>
+    );
+  };
+
+  const renderScheduleMatrix = () => (
+    <div className="flex-1 min-h-0 border border-gray-200 bg-white overflow-hidden rounded-2xl shadow-sm">
+      <div className="grid h-full" style={{ gridTemplateColumns: '48px 1fr 1fr 0.55fr', gridTemplateRows: 'auto 1fr 1fr' }}>
+        <div className="border-r border-b border-gray-200 bg-gradient-to-b from-gray-50 to-white" />
+        <div className="border-r border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-purple-600 to-purple-500">PENDING</div>
+        <div className="border-r border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-indigo-600 to-indigo-500">STATUS</div>
+        <div className="border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-slate-600 to-slate-500">PLANNING</div>
+
+        <div className="border-r border-b border-gray-200 flex items-center justify-center bg-amber-50 min-h-0">
+          <span className="rotate-[-90deg] text-xs font-bold tracking-widest text-amber-700 whitespace-nowrap">DELIVERY</span>
+        </div>
+        {renderMatrixSection(DELIVERY_PENDING, 'delivery')}
+        {renderMatrixSection(DELIVERY_STATUS, 'delivery')}
+        {renderMatrixSection(DELIVERY_PLANNING, 'delivery')}
+
+        <div className="border-r border-gray-200 flex items-center justify-center bg-indigo-50 min-h-0">
+          <span className="rotate-[-90deg] text-xs font-bold tracking-widest text-indigo-700 whitespace-nowrap">INSTALLATION</span>
+        </div>
+        {renderMatrixSection(INSTALLATION_PENDING, 'installation')}
+        {renderMatrixSection(INSTALLATION_STATUS, 'installation')}
+        {renderMatrixSection(INSTALLATION_PLANNING, 'installation')}
+      </div>
+    </div>
+  );
+
   /* ── Stats ─────────────────────────────────────────────────────────────── */
 
-  const totalDel   = Object.keys(store).filter(k=>k.startsWith('delivery-')).reduce((n,k)=>n+(store[k]?.length??0),0);
-  const totalInst  = Object.keys(store).filter(k=>k.startsWith('installation-')).reduce((n,k)=>n+(store[k]?.length??0),0);
-  const inProgress = Object.keys(store).filter(k=>k.startsWith('installation-')).reduce((n,k)=>n+(store[k]?.length??0),0);
-  const totalPend  = getCards('pending-delivery').length+getCards('pending-installation').length;
+  const totalDel   = Object.keys(store).filter(k=>k.endsWith('-delivery')).reduce((n,k)=>n+(store[k]?.length??0),0);
+  const totalInst  = Object.keys(store).filter(k=>k.endsWith('-installation')).reduce((n,k)=>n+(store[k]?.length??0),0);
+  const inProgress = getCards(INSTALLATION_STATUS).length;
+  const totalPend  = getCards(DELIVERY_PENDING).length+getCards(INSTALLATION_PENDING).length;
 
   const stats=[
     {Icon:Truck,    bg:'bg-blue-50',    ic:'text-blue-500',    label:'Total Deliveries',    val:totalDel,   trend:'+8.5% vs last week', up:true },
@@ -2055,14 +2807,24 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           <p className="text-xs text-gray-400 mt-0.5">{format(parseISO(referenceDate),'EEEE, MMMM d, yyyy')}</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 border border-gray-200 rounded-lg bg-white">
-            <span className="text-xs font-semibold text-gray-500">Current Date</span>
+          <div className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-lg bg-white ${searchDate ? 'border-purple-300 ring-1 ring-purple-200' : 'border-gray-200'}`}>
+            <Search className="w-3.5 h-3.5 text-gray-400"/>
+            <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">Search by Date</span>
             <input
               type="date"
-              value={referenceDate}
-              onChange={e => setReferenceDate(e.target.value || dateKey())}
+              value={searchDate}
+              onChange={e => setSearchDate(e.target.value)}
               className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
+            {searchDate && (
+              <button
+                onClick={() => setSearchDate('')}
+                title="Back to live view"
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-3.5 h-3.5"/>
+              </button>
+            )}
           </div>
           <button
             onClick={() => { void handleGenerateReports(); }}
@@ -2125,31 +2887,38 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           </div>))}
       </div>
 
-      {/* ── 4-quadrant layout ── */}
+      {/* ── 2x3 Schedule Matrix ── */}
+      {searchDate && (
+        <div className="mx-4 mb-2 flex-shrink-0 flex items-center justify-between gap-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5">
+          <span className="text-xs font-medium text-purple-700">
+            Viewing historical status as of {format(parseISO(searchDate),'EEEE, MMMM d, yyyy')} (read-only)
+          </span>
+          <button onClick={() => setSearchDate('')} className="text-xs font-semibold text-purple-700 hover:text-purple-900 underline">
+            Back to live view
+          </button>
+        </div>
+      )}
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-2 px-4 pb-3 min-h-0 overflow-hidden">
-          {renderCombinedInstallation()}
-          {renderDateGrid('delivery')}
-          {renderPending()}
+        <div className="flex-1 flex flex-col px-4 pb-3 min-h-0 overflow-hidden">
+          {renderScheduleMatrix()}
         </div>
       </DragDropContext>
 
       {/* Modals */}
       {addCardType&&<AddCardModal type={addCardType} onClose={()=>setAddCardType(null)} onAdd={c=>setStore(prev=>({...prev,[c.listId]:[...(prev[c.listId]??[]),c]}))}/>}
-      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} canEdit={canEditSchedule} referenceDate={referenceDate} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
+      {expandedList && (
+        <MatrixFullscreenModal
+          listId={expandedList.listId}
+          phase={expandedList.phase}
+          cards={sortScheduleGroup(getCards(expandedList.listId).filter(matchesWo))}
+          onOpenCard={(card) => setSelected({ card, listId: expandedList.listId })}
+          onClose={() => setExpandedList(null)}
+        />
+      )}
+      {selected&&<CardDetailModal card={selected.card} listId={selected.listId} canEdit={canEditSchedule && !searchDate} referenceDate={referenceDate} onClose={()=>setSelected(null)} onSave={(u,lid)=>{
         setStore(prev => {
           const sourceList = selected.listId;
           const next: ScStore = { ...prev };
-          const applyGroupLock = typeof u.tankGroupLocked === 'boolean' && !!u.sourceCardId;
-          if (applyGroupLock) {
-            Object.keys(next).forEach(listKey => {
-              next[listKey] = (next[listKey] ?? []).map(card =>
-                String(card.sourceCardId) === String(u.sourceCardId)
-                  ? { ...card, tankGroupLocked: u.tankGroupLocked }
-                  : card
-              );
-            });
-          }
           next[sourceList] = (next[sourceList] ?? []).filter(c => c.id !== u.id);
           const destination = next[lid] ?? [];
           if (destination.some(c => c.id === u.id)) {
@@ -2160,11 +2929,9 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           return next;
         });
         const forcedType: 'Delivery' | 'Installation' | undefined =
-          (lid === 'pending-installation' || lid.startsWith('installation-'))
-            ? 'Installation'
-            : (lid === 'pending-delivery' || lid.startsWith('delivery-'))
-              ? 'Delivery'
-              : undefined;
+          u.scheduleType === 'Delivery & Installation'
+            ? undefined
+            : (getPhaseForListId(lid) === 'installation' ? 'Installation' : 'Delivery');
         void syncScheduleCardToWorkOrder({ ...u, listId: lid }, forcedType);
       }}/>} 
       {pendingDrop&&(
