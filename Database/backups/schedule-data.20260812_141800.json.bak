@@ -1,0 +1,307 @@
+{
+  "pending-delivery": [
+    {
+      "id": "wo-1784366492534-delivery",
+      "sourceCardId": "1784366492534",
+      "phase": "delivery",
+      "woCode": "0000",
+      "scheduleType": "Delivery & Installation",
+      "listId": "pending-delivery",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-18T09:21:32.708715+00:00",
+      "customer": "FLATIRON GENERAL",
+      "location": "ABU DHABI",
+      "tankSize": "5x2x1, 3x2x1, 2x1x1, 2.5x2x1, 2x2x2",
+      "tanks": [
+        {
+          "tankDetailId": "tank-1784366526195-1",
+          "label": "T1",
+          "tankSize": "5x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366620080-2",
+          "label": "T2",
+          "tankSize": "3x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366641147-3",
+          "label": "T3",
+          "tankSize": "2x1x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366652812-4",
+          "label": "T4",
+          "tankSize": "2.5x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366668576-5",
+          "label": "T5",
+          "tankSize": "2x2x2",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        }
+      ],
+      "contactPerson": "MOHAMED",
+      "phone": "0547027851",
+      "salesPerson": "Anoop Mohan",
+      "brand": "PIPECO"
+    }
+  ],
+  "pending-installation": [
+    {
+      "id": "wo-1784366492534-installation",
+      "sourceCardId": "1784366492534",
+      "phase": "installation",
+      "woCode": "0000",
+      "scheduleType": "Delivery & Installation",
+      "listId": "pending-installation",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-18T09:21:32.708715+00:00",
+      "customer": "FLATIRON GENERAL",
+      "location": "ABU DHABI",
+      "tankSize": "5x2x1, 3x2x1, 2x1x1, 2.5x2x1, 2x2x2",
+      "tanks": [
+        {
+          "tankDetailId": "tank-1784366526195-1",
+          "label": "T1",
+          "tankSize": "5x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366620080-2",
+          "label": "T2",
+          "tankSize": "3x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366641147-3",
+          "label": "T3",
+          "tankSize": "2x1x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366652812-4",
+          "label": "T4",
+          "tankSize": "2.5x2x1",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784366668576-5",
+          "label": "T5",
+          "tankSize": "2x2x2",
+          "itemDescription": "",
+          "tankType": "NON-INS",
+          "remarks": "",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Not Started",
+          "workers": []
+        }
+      ],
+      "contactPerson": "MOHAMED",
+      "phone": "0547027851",
+      "salesPerson": "Anoop Mohan",
+      "brand": "PIPECO"
+    }
+  ],
+  "status-delivery": [],
+  "planning-delivery": [],
+  "status-installation": [],
+  "planning-installation": [],
+  "archive-completed": [
+    {
+      "id": "wo-1784283780452-installation",
+      "sourceCardId": "1784283780452",
+      "phase": "installation",
+      "woCode": "0000",
+      "scheduleType": "Delivery & Installation",
+      "listId": "archive-completed",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-17T10:23:00.512957+00:00",
+      "customer": "fvsdfvs",
+      "location": "sdfvsdv",
+      "tankSize": "1x2x3, 2x1x2",
+      "tanks": [
+        {
+          "tankDetailId": "tank-1784283785704-1",
+          "label": "T1",
+          "tankSize": "1x2x3",
+          "itemDescription": "davdv",
+          "tankType": "INS",
+          "remarks": "dsavsdv",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Completed",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784283795844-2",
+          "label": "T2",
+          "tankSize": "2x1x2",
+          "itemDescription": "zxdvs",
+          "tankType": "NON-INS",
+          "remarks": "dvsd",
+          "deliveryStatus": "Not Delivered",
+          "installationStatus": "Completed",
+          "workers": []
+        }
+      ],
+      "contactPerson": "fvsdfvs",
+      "salesPerson": "sfdvs",
+      "brand": "PIPECO",
+      "productType": "v sdv",
+      "returnedFromDate": "2026-07-17",
+      "updatedAt": "2026-07-17T13:44:00.668Z"
+    },
+    {
+      "id": "wo-1784283780452-delivery",
+      "sourceCardId": "1784283780452",
+      "phase": "delivery",
+      "woCode": "0000",
+      "scheduleType": "Delivery & Installation",
+      "listId": "archive-completed",
+      "workers": [],
+      "isEmergency": false,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-17T10:23:00.512957+00:00",
+      "customer": "fvsdfvs",
+      "location": "sdfvsdv",
+      "tankSize": "1x2x3, 2x1x2",
+      "tanks": [
+        {
+          "tankDetailId": "tank-1784283785704-1",
+          "label": "T1",
+          "tankSize": "1x2x3",
+          "itemDescription": "davdv",
+          "tankType": "INS",
+          "remarks": "dsavsdv",
+          "deliveryStatus": "Completed",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784283795844-2",
+          "label": "T2",
+          "tankSize": "2x1x2",
+          "itemDescription": "zxdvs",
+          "tankType": "NON-INS",
+          "remarks": "dvsd",
+          "deliveryStatus": "Completed",
+          "installationStatus": "Not Started",
+          "workers": []
+        }
+      ],
+      "contactPerson": "fvsdfvs",
+      "salesPerson": "sfdvs",
+      "brand": "PIPECO",
+      "productType": "v sdv",
+      "updatedAt": "2026-07-17T10:25:25.737Z"
+    },
+    {
+      "id": "wo-1784271456024-delivery",
+      "sourceCardId": "1784271456024",
+      "phase": "delivery",
+      "woCode": "8754",
+      "scheduleType": "Delivery & Installation",
+      "listId": "archive-completed",
+      "workers": [],
+      "isEmergency": true,
+      "paymentPercent": 0,
+      "isConfirmed": false,
+      "remarks": [],
+      "createdAt": "2026-07-17T06:57:36.091649+00:00",
+      "customer": "adcasc",
+      "location": "adsscas",
+      "tankSize": "1x2x1, 2x1x3",
+      "tanks": [
+        {
+          "tankDetailId": "tank-1784271462481-1",
+          "label": "T1",
+          "tankSize": "1x2x1",
+          "itemDescription": "asxsqx",
+          "tankType": "INS",
+          "remarks": "qxwsq",
+          "deliveryStatus": "Completed",
+          "installationStatus": "Not Started",
+          "workers": []
+        },
+        {
+          "tankDetailId": "tank-1784271469571-2",
+          "label": "T2",
+          "tankSize": "2x1x3",
+          "itemDescription": "qxwqx",
+          "tankType": "NON-INS",
+          "remarks": "qwxqwx",
+          "deliveryStatus": "Completed",
+          "installationStatus": "Not Started",
+          "workers": []
+        }
+      ],
+      "contactPerson": "adcasc",
+      "salesPerson": "zdcvad",
+      "brand": "PIPECO",
+      "productType": "ascac",
+      "updatedAt": "2026-07-18T10:21:40.615Z"
+    }
+  ]
+}

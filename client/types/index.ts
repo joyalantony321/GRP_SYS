@@ -143,10 +143,15 @@ export interface Card {
 export interface TankDetail {
   id: string;
   label: string;
+  /** @deprecated dimensions are no longer collected separately; use itemDescription (Tank Size / Material) instead. */
   length: string;
+  /** @deprecated see itemDescription */
   width: string;
+  /** @deprecated see itemDescription */
   height: string;
+  /** Tank size (e.g. "5X4X3") or material name (e.g. "PVC TANK"). */
   itemDescription: string;
+  qty: string;
   tankType: '' | 'INS' | 'NON-INS';
   remarks: string;
 }

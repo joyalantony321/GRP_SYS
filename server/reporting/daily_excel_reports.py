@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from openpyxl import load_workbook
+from openpyxl.styles import Alignment, PatternFill
 from sqlalchemy.orm import Session, joinedload
 
 from models import Card, Channel
@@ -19,9 +20,10 @@ DATE_FMT = "%d-%b-%Y"
 
 
 HEADER_ALIASES: Dict[str, List[str]] = {
-    "Work Order No.": ["W.O.NO.", "W.O.NO", "WO", "WONO", "WO NO", "WORK ORDER NO", "WORKORDERNO"],
+    "Work Order No.": ["W.O.NO.", "W.O.NO", "WO", "WONO", "WO NO", "WORK ORDER NO", "WORKORDERNO", "'"],
     "Customer": ["CUSTOMER", "CUSTOMER NAME"],
-    "Tank Size": ["TANK SIZE", "TANKSIZE"],
+    "Tank Size": ["TANK SIZE", "TANKSIZE", "TANK SIZE/MATERIAL", "TANK SIZE / MATERIAL", "TANK SIZE MATERIAL"],
+    "Qty": ["QTY", "QUANTITY"],
     "Brand": ["BRAND"],
     "Type (INS / NON)": ["TYPE", "TYPE (INS / NON)", "INS / NON"],
     "Type": ["TYPE", "TYPE (INS / NON)", "INS / NON"],
@@ -39,7 +41,7 @@ HEADER_ALIASES: Dict[str, List[str]] = {
     "Installation Completion Date": ["INS.COMPLET.", "INS.COMPL.DATE", "INS COMPLETION DATE", "INSTALLATION COMPLETION DATE"],
     "Installation Date": ["INSTALLATION DATE", "INSTA.", "INS.DATE", "INS DATE"],
     "Payment Status": ["PAYMENT STATUS", "PAY.STATUS", "PAY STATUS"],
-    "PDC Cheque": ["PDC CHEQUE", "P.D.C. CHEUQE", "P.D.C. CHEQUE", "PDC CHECK"],
+    "PDC Cheque": ["PDC CHEQUE", "P.D.C. CHEUQE", "P.D.C. CHEQUE", "PDC CHECK", "CHEUQE STATUS", "CHEQUE STATUS"],
 }
 
 ACTIVE_SCHEDULE_LISTS = {
@@ -83,6 +85,11 @@ class ReportRecord:
     requires_installation: Optional[bool]
     completed_date: Optional[date]
     updated_date: Optional[date]
+    tanks: List[Dict[str, str]] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.tanks is None:
+            self.tanks = []
 
 
 @dataclass
@@ -97,6 +104,7 @@ class ScheduleOverlay:
 @dataclass
 class ScheduleCardSnapshot:
     source_card_id: str
+    card_id: str
     wo_code: str
     list_id: str
     phase: str
@@ -125,6 +133,11 @@ class ScheduleCardSnapshot:
     payment_percent: int
     latest_remark_text: str
     latest_remark_at: Optional[date]
+    tanks: List[Dict[str, str]] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.tanks is None:
+            self.tanks = []
 
 
 @dataclass(frozen=True)
@@ -150,6 +163,13 @@ def _fmt_date(value: Optional[date]) -> str:
     if not value:
         return ""
     return value.strftime(DATE_FMT)
+
+
+def _fmt_export_date(value: Optional[date]) -> str:
+    """Dot-separated DD.MM.YYYY date, matching the company's Excel export format."""
+    if not value:
+        return ""
+    return value.strftime("%d.%m.%Y")
 
 
 def _normalize_text(value: str) -> str:
@@ -276,16 +296,20 @@ def _pdc_cheque_percent(card: Card) -> str:
     return f"{round(total, 2)}%"
 
 
-def _normalize_overlay_brand(value: str) -> str:
+def _normalize_brand_value(value: Optional[str]) -> str:
     raw = (value or "").strip()
     if not raw:
         return ""
     upper = raw.upper()
     if "COLEX" in upper:
-        return "COLEX TANKS"
-    if "PIPECO" in upper or "PIPECO" in upper:
-        return "PIPECO TANKS"
+        return "COLEX"
+    if "PIPECO" in upper:
+        return "PIPECO"
     return raw
+
+
+def _normalize_overlay_brand(value: str) -> str:
+    return _normalize_brand_value(value)
 
 
 def _payment_completed_on(rec: ReportRecord) -> Optional[date]:
@@ -397,7 +421,7 @@ def _to_record(card: Card) -> ReportRecord:
         quotation_no=(card.quote_number or "").strip(),
         customer=(card.customer_company_name or (wo.company_name if wo else "") or card.customer_name or "").strip(),
         tank_size=_tank_size(card),
-        brand=(wo.brand.value if wo and wo.brand else "").strip(),
+        brand=_normalize_brand_value(wo.brand.value if wo and wo.brand else ""),
         tank_type=_tank_type(card),
         location=(card.project_location or (wo.delivery_location if wo else "") or "").strip(),
         delivery_date=_fmt_date((wo.delivery_date if wo and wo.delivery_date else card.date)),
@@ -616,12 +640,29 @@ def _build_historical_schedule_store(base: Dict[str, Any], search_day: date) -> 
     return next_store
 
 
+def _build_live_schedule_store(base: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    next_store: Dict[str, List[Dict[str, Any]]] = {list_id: [] for list_id in ACTIVE_SCHEDULE_LISTS}
+    for list_id, cards in base.items():
+        if list_id not in ACTIVE_SCHEDULE_LISTS or not isinstance(cards, list):
+            continue
+        for row in cards:
+            if not isinstance(row, dict):
+                continue
+            row_copy = dict(row)
+            row_copy["listId"] = str(row.get("listId") or list_id)
+            next_store[list_id].append(row_copy)
+    return next_store
+
+
 def _load_schedule_cards(run_day: date) -> List[ScheduleCardSnapshot]:
     raw = _load_schedule_store_raw()
     if not raw:
         return []
 
-    historical = _build_historical_schedule_store(raw, run_day)
+    if run_day == _today_local():
+        historical = _build_live_schedule_store(raw)
+    else:
+        historical = _build_historical_schedule_store(raw, run_day)
     cards: List[ScheduleCardSnapshot] = []
 
     def latest_schedule_remark(row: Dict[str, Any]) -> tuple[str, Optional[date]]:
@@ -699,6 +740,29 @@ def _load_schedule_cards(run_day: date) -> List[ScheduleCardSnapshot]:
                 return value
         return ""
 
+    def build_tank_export_rows(tanks: List[Dict[str, Any]], phase: str) -> List[Dict[str, str]]:
+        """One export row per tank/material — the date stays blank until the
+        tank is actually scheduled, but the status column always shows a
+        value ('NOT SCHEDULED' as the default) matching the Schedule Channel."""
+        status_key = "deliveryStatus" if phase == "delivery" else "installationStatus"
+        rows: List[Dict[str, str]] = []
+        for tank in tanks:
+            status = str(tank.get(status_key) or "").strip() or "Not scheduled"
+            is_scheduled = status.strip().lower() != "not scheduled"
+            scheduled_date = _parse_iso_date(tank.get("scheduledDate"))
+            completion_date = _parse_iso_date(tank.get("completionDate"))
+            tank_type = str(tank.get("tankType") or "").strip().upper()
+            rows.append({
+                "tank_size": str(tank.get("tankSize") or "").strip(),
+                "qty": str(tank.get("qty") or "1").strip(),
+                "tank_type": "NON" if tank_type == "NON-INS" else tank_type,
+                "date": _fmt_export_date(scheduled_date) if is_scheduled else "",
+                "status": status.upper(),
+                "completion_date": _fmt_export_date(completion_date) if completion_date else "",
+                "remarks": str(tank.get("remarks") or "").strip(),
+            })
+        return rows
+
     for list_id, rows in historical.items():
         if not isinstance(rows, list):
             continue
@@ -725,6 +789,7 @@ def _load_schedule_cards(run_day: date) -> List[ScheduleCardSnapshot]:
             cards.append(
                 ScheduleCardSnapshot(
                     source_card_id=str(row.get("sourceCardId") or "").strip(),
+                    card_id=str(row.get("id") or "").strip(),
                     wo_code=str(row.get("woCode") or "").strip(),
                     list_id=str(row.get("listId") or list_id or "").strip(),
                     phase=phase,
@@ -753,6 +818,7 @@ def _load_schedule_cards(run_day: date) -> List[ScheduleCardSnapshot]:
                     payment_percent=max(0, min(100, _as_int(row.get("paymentPercent"), 0))),
                     latest_remark_text=section_remarks or latest_text or tank_remarks,
                     latest_remark_at=latest_at,
+                    tanks=build_tank_export_rows(tanks, phase),
                 )
             )
     return cards
@@ -828,13 +894,15 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
     if sc.latest_remark_text:
         rec.remarks = sc.latest_remark_text
 
+    # Only stamp a fallback date once the phase has actually been scheduled —
+    # leave the date column blank for cards still sitting at "Not scheduled".
     if sc.delivery_date:
         rec.delivery_date = sc.delivery_date
-    elif not rec.delivery_date:
+    elif not rec.delivery_date and rec.delivery_status.strip().lower() not in ("", "not scheduled"):
         rec.delivery_date = _fmt_date(sc.returned_from_date or sc.confirmed_date or sc.created_date or today)
     if sc.installation_date:
         rec.installation_date = sc.installation_date
-    elif not rec.installation_date:
+    elif not rec.installation_date and rec.installation_status.strip().lower() not in ("", "not scheduled"):
         rec.installation_date = _fmt_date(sc.returned_from_date or sc.confirmed_date or sc.created_date or today)
 
     if sc.phase == "delivery" and sc.is_confirmed:
@@ -850,6 +918,8 @@ def _record_from_schedule_card(base: Optional[ReportRecord], sc: ScheduleCardSna
 
     if not rec.schedule_type:
         rec.schedule_type = sc.schedule_type
+    if sc.tanks:
+        rec.tanks = sc.tanks
     return rec
 
 
@@ -877,20 +947,42 @@ def _build_records_by_schedule(
         "payment_status": [],
     }
 
+    def identity(sc: ScheduleCardSnapshot) -> str:
+        # Match the client's dedup key: fall back to the schedule card's own
+        # unique id (not WO number) so distinct manually-added cards sharing
+        # the same WO code are never collapsed into a single export row.
+        return f"{sc.source_card_id or sc.card_id or sc.wo_code}:{sc.phase}"
+
+    # Pending must show the full, permanent set of work orders for a phase —
+    # while a card is actively being worked on in Planning/Status it still
+    # belongs in Pending, but reflects that list's live status/date/workers/
+    # remarks (and each work order appears only once, never duplicated).
+    pending_delivery_by_identity: Dict[str, ScheduleCardSnapshot] = {}
+    pending_installation_by_identity: Dict[str, ScheduleCardSnapshot] = {}
+
+    for sc in schedule_cards:
+        if sc.list_id == "pending-delivery":
+            pending_delivery_by_identity[identity(sc)] = sc
+        elif sc.list_id == "pending-installation":
+            pending_installation_by_identity[identity(sc)] = sc
+
     for sc in schedule_cards:
         lid = sc.list_id
-        if lid == "pending-delivery":
-            buckets["delivery_pending"].append(materialize(sc))
-        elif lid == "planning-delivery":
+        if lid == "planning-delivery":
             buckets["delivery_planning"].append(materialize(sc))
+            pending_delivery_by_identity[identity(sc)] = sc
         elif lid == "status-delivery":
             buckets["delivery_status"].append(materialize(sc))
-        elif lid == "pending-installation":
-            buckets["installation_pending"].append(materialize(sc))
+            pending_delivery_by_identity[identity(sc)] = sc
         elif lid == "planning-installation":
             buckets["installation_planning"].append(materialize(sc))
+            pending_installation_by_identity[identity(sc)] = sc
         elif lid == "status-installation":
             buckets["installation_status"].append(materialize(sc))
+            pending_installation_by_identity[identity(sc)] = sc
+
+    buckets["delivery_pending"] = [materialize(sc) for sc in pending_delivery_by_identity.values()]
+    buckets["installation_pending"] = [materialize(sc) for sc in pending_installation_by_identity.values()]
 
     # Payment report should also reflect only the selected-day schedule snapshot.
     seen_keys = set()
@@ -979,6 +1071,184 @@ def _copy_row_style(ws, src_row: int, dst_row: int, max_col: int) -> None:
         dst.protection = copy(src.protection)
 
 
+# Columns that identify a work order/group rather than a single row; when
+# multiple consecutive rows belong to the same work order these are merged
+# vertically in the exported Excel instead of being repeated on every row.
+GROUP_MERGE_COLUMNS = ["Work Order No.", "Customer", "Brand", "Tank Size", "Location"]
+
+
+def _merge_repeated_group_cells(ws, data_row: int, num_rows: int, col_map: Dict[str, int]) -> None:
+    if num_rows <= 1:
+        return
+    wo_col = col_map.get("Work Order No.")
+    if not wo_col:
+        return
+    end_row = data_row + num_rows - 1
+    row = data_row
+    while row <= end_row:
+        wo_value = ws.cell(row=row, column=wo_col).value
+        next_row = row + 1
+        while next_row <= end_row and ws.cell(row=next_row, column=wo_col).value == wo_value:
+            next_row += 1
+        run_len = next_row - row
+        if run_len > 1:
+            for col_name in GROUP_MERGE_COLUMNS:
+                col_idx = col_map.get(col_name)
+                if not col_idx:
+                    continue
+                values = {ws.cell(row=r, column=col_idx).value for r in range(row, next_row)}
+                if len(values) != 1:
+                    continue
+                ws.merge_cells(start_row=row, start_column=col_idx, end_row=next_row - 1, end_column=col_idx)
+                cell = ws.cell(row=row, column=col_idx)
+                cell.alignment = Alignment(
+                    vertical="center",
+                    horizontal=cell.alignment.horizontal,
+                    wrap_text=True,
+                )
+        row = next_row
+
+
+STATUS_COLOR_NOT_SCHEDULED = PatternFill("solid", fgColor="F2F2F2")
+STATUS_COLOR_SCHEDULED = PatternFill("solid", fgColor="DDEBF7")
+STATUS_COLOR_PARTIAL = PatternFill("solid", fgColor="FCE4D6")
+STATUS_COLOR_COMPLETE = PatternFill("solid", fgColor="E2EFDA")
+
+STATUS_COLUMN_NAMES = {"Delivery Status", "Installation Status"}
+PAYMENT_COLUMN_NAMES = {"Payment Status"}
+
+
+def _status_fill(status: str) -> Optional[PatternFill]:
+    text = (status or "").strip().lower()
+    if not text or "not" in text:
+        return STATUS_COLOR_NOT_SCHEDULED
+    if "partial" in text:
+        return STATUS_COLOR_PARTIAL
+    if "fully" in text or "complet" in text or "delivered" in text or "installed" in text:
+        return STATUS_COLOR_COMPLETE
+    if "scheduled" in text or "progress" in text:
+        return STATUS_COLOR_SCHEDULED
+    return None
+
+
+def _payment_fill(payment_percent: int) -> PatternFill:
+    p = max(0, min(100, int(payment_percent or 0)))
+    if p == 0:
+        return STATUS_COLOR_NOT_SCHEDULED
+    if p < 50:
+        return PatternFill("solid", fgColor="FFF7CC")
+    if p < 100:
+        return STATUS_COLOR_SCHEDULED
+    return STATUS_COLOR_COMPLETE
+
+
+# Columns that describe the work order as a whole (merged vertically across
+# its tank rows) rather than a single tank/material (kept per-row).
+GROUP_LEVEL_COLUMNS = {
+    "Work Order No.", "Customer", "Brand", "Location",
+    "Contact Person", "Phone Number", "Sales Person", "Workers",
+}
+
+
+def _tank_row_value(rec: ReportRecord, tank: Dict[str, str], col_name: str) -> str:
+    if col_name == "Tank Size":
+        return tank.get("tank_size", "")
+    if col_name == "Qty":
+        return tank.get("qty", "")
+    if col_name in ("Type", "Type (INS / NON)"):
+        return tank.get("tank_type", "")
+    if col_name in ("Delivery Date", "Installation Start Date"):
+        return tank.get("date", "")
+    if col_name in ("Delivery Status", "Installation Status"):
+        return tank.get("status", "")
+    if col_name in ("Delivery Completion Date", "Installation Completion Date"):
+        return tank.get("completion_date", "")
+    if col_name == "Remarks":
+        return tank.get("remarks", "") or rec.remarks
+    return _column_value(rec, col_name)
+
+
+def _write_tank_rows_to_template(template_path: Path, output_path: Path, rows: List[ReportRecord], spec: ReportSpec) -> Path:
+    """Writes one physical row per tank/material (matching the Schedule
+    Channel's own per-tank breakdown), merging the work-order-level columns
+    (WO No., Customer, Brand, Location, Contact, Phone, Sales Person, Workers)
+    vertically across each work order's tank rows."""
+    wb = load_workbook(template_path)
+    ws = wb.active
+    header_row, col_map = _find_header_row(ws, spec.columns)
+    data_row = header_row + 1
+    max_col = max(col_map.values())
+    is_delivery = "Delivery Status" in col_map
+    status_col_name = "Delivery Status" if is_delivery else "Installation Status"
+
+    for row_idx in range(data_row, ws.max_row + 1):
+        for col in col_map.values():
+            ws.cell(row=row_idx, column=col).value = None
+
+    target_row = data_row
+    group_spans: List[tuple[int, int]] = []
+
+    for rec in rows:
+        fallback_status = (rec.delivery_status if is_delivery else rec.installation_status).strip() or "Not scheduled"
+        tanks = rec.tanks or [{
+            "tank_size": rec.tank_size, "qty": "1", "tank_type": rec.tank_type,
+            "date": (rec.delivery_date if is_delivery else rec.installation_date) if fallback_status.lower() != "not scheduled" else "",
+            "status": fallback_status.upper(),
+            "completion_date": rec.delivery_completion_date if is_delivery else rec.installation_completion_date,
+            "remarks": rec.remarks,
+        }]
+        start_row = target_row
+        for tank in tanks:
+            if target_row > ws.max_row:
+                ws.insert_rows(target_row)
+            _copy_row_style(ws, data_row, target_row, max_col)
+            for col_name, col_idx in col_map.items():
+                cell = ws.cell(row=target_row, column=col_idx)
+                if col_name in GROUP_LEVEL_COLUMNS:
+                    value = _column_value(rec, col_name) if target_row == start_row else ""
+                else:
+                    value = _tank_row_value(rec, tank, col_name)
+                cell.value = value
+                if col_name == "Remarks":
+                    cell.alignment = Alignment(
+                        vertical=cell.alignment.vertical or "top",
+                        horizontal=cell.alignment.horizontal,
+                        wrap_text=True,
+                    )
+                elif col_name == status_col_name:
+                    fill = _status_fill(value)
+                    if fill:
+                        cell.fill = fill
+            target_row += 1
+        group_spans.append((start_row, target_row - 1))
+
+    for start_row, end_row in group_spans:
+        if end_row <= start_row:
+            continue
+        for col_name in GROUP_LEVEL_COLUMNS:
+            col_idx = col_map.get(col_name)
+            if not col_idx:
+                continue
+            ws.merge_cells(start_row=start_row, start_column=col_idx, end_row=end_row, end_column=col_idx)
+            cell = ws.cell(row=start_row, column=col_idx)
+            cell.alignment = Alignment(
+                vertical="center",
+                horizontal=cell.alignment.horizontal,
+                wrap_text=True,
+            )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        wb.save(output_path)
+        return output_path
+    except PermissionError:
+        fallback = output_path.with_name(
+            f"{output_path.stem} ({datetime.now().strftime('%H%M%S')}){output_path.suffix}"
+        )
+        wb.save(fallback)
+        return fallback
+
+
 def _write_rows_to_template(template_path: Path, output_path: Path, rows: List[ReportRecord], spec: ReportSpec) -> Path:
     wb = load_workbook(template_path)
     ws = wb.active
@@ -996,7 +1266,23 @@ def _write_rows_to_template(template_path: Path, output_path: Path, rows: List[R
             ws.insert_rows(target_row)
         _copy_row_style(ws, data_row, target_row, max_col)
         for col_name, col_idx in col_map.items():
-            ws.cell(row=target_row, column=col_idx).value = _column_value(rec, col_name)
+            cell = ws.cell(row=target_row, column=col_idx)
+            value = _column_value(rec, col_name)
+            cell.value = value
+            if col_name == "Remarks":
+                cell.alignment = Alignment(
+                    vertical=cell.alignment.vertical or "top",
+                    horizontal=cell.alignment.horizontal,
+                    wrap_text=True,
+                )
+            elif col_name in STATUS_COLUMN_NAMES:
+                fill = _status_fill(value)
+                if fill:
+                    cell.fill = fill
+            elif col_name in PAYMENT_COLUMN_NAMES:
+                cell.fill = _payment_fill(rec.payment_percent)
+
+    _merge_repeated_group_cells(ws, data_row, len(rows), col_map)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -1018,8 +1304,8 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Delivery Planning.xlsx",
         output_stem="Planning_Delivery",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type (INS / NON)", "Location",
-            "Delivery Date", "Delivery Status", "Delivery Completion Date", "Contact Person",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Delivery Date", "Delivery Status", "Contact Person",
             "Phone Number", "Sales Person", "Remarks",
         ],
         include=_delivery_planning,
@@ -1029,8 +1315,9 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Delivery Pending.xlsx",
         output_stem="Pending_Delivery",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Delivery Date",
-            "Delivery Status", "Delivery Completion Date", "Contact Person", "Phone Number", "Sales Person", "Remarks",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Delivery Date", "Delivery Status", "Contact Person",
+            "Phone Number", "Sales Person", "Remarks",
         ],
         include=_delivery_pending,
     ),
@@ -1039,8 +1326,9 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Delivery Status.xlsx",
         output_stem="Status_Delivery",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Delivery Date",
-            "Delivery Status", "Delivery Completion Date", "Contact Person", "Phone Number", "Sales Person", "Remarks",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Delivery Date", "Delivery Status", "Contact Person",
+            "Phone Number", "Sales Person", "Remarks",
         ],
         include=_delivery_status,
     ),
@@ -1049,9 +1337,9 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Installation Planning.xlsx",
         output_stem="Planning_Installation",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
-            "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
-            "Sales Person", "Remarks",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Installation Start Date", "Installation Status", "Workers",
+            "Contact Person", "Phone Number", "Sales Person", "Remarks",
         ],
         include=_installation_planning,
     ),
@@ -1060,9 +1348,9 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Installation Pending.xlsx",
         output_stem="Pending_Installation",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
-            "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
-            "Sales Person", "Remarks",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Installation Start Date", "Installation Status", "Workers",
+            "Contact Person", "Phone Number", "Sales Person", "Remarks",
         ],
         include=_installation_pending,
     ),
@@ -1071,9 +1359,9 @@ REPORT_SPECS: List[ReportSpec] = [
         template_name="Installation Status.xlsx",
         output_stem="Status_Installation",
         columns=[
-            "Work Order No.", "Customer", "Tank Size", "Brand", "Type", "Location", "Installation Start Date",
-            "Installation Status", "Workers", "Contact Person", "Phone Number", "Installation Completion Date",
-            "Sales Person", "Remarks",
+            "Work Order No.", "Customer", "Brand", "Location", "Tank Size", "Qty", "Type",
+            "Installation Start Date", "Installation Status", "Workers",
+            "Contact Person", "Phone Number", "Sales Person", "Remarks",
         ],
         include=_installation_status,
     ),
@@ -1178,7 +1466,10 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
             ]
         filename = f"{spec.output_stem}_{today.strftime('%Y-%m-%d')}.xlsx"
         out_path = output_dir / filename
-        saved_path = _write_rows_to_template(template_path, out_path, rows, spec)
+        if spec.key == "payment_status":
+            saved_path = _write_rows_to_template(template_path, out_path, rows, spec)
+        else:
+            saved_path = _write_tank_rows_to_template(template_path, out_path, rows, spec)
         outputs[spec.key] = str(saved_path)
 
     if missing_templates:

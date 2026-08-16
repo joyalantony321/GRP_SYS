@@ -222,6 +222,7 @@ export function mapCard(c: Record<string, unknown>): Card {
       width: (tank.width as string) ?? '',
       height: (tank.height as string) ?? '',
       itemDescription: ((tank.itemDescription as string) ?? (tank.item_description as string) ?? ''),
+      qty: (tank.qty as string) ?? '1',
       tankType: ((tank.tankType as '' | 'INS' | 'NON-INS') ?? (tank.tank_type as '' | 'INS' | 'NON-INS') ?? ''),
       remarks: (tank.remarks as string) ?? '',
     })),

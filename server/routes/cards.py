@@ -136,10 +136,11 @@ class WorkOrderDetailsIn(BaseModel):
 class TankDetailIn(BaseModel):
     id: str
     label: str
-    length: str
-    width: str
-    height: str
+    length: Optional[str] = ""
+    width: Optional[str] = ""
+    height: Optional[str] = ""
     itemDescription: Optional[str] = None
+    qty: Optional[str] = "1"
     tankType: Optional[Literal["INS", "NON-INS", ""]] = None
     remarks: Optional[str] = None
 

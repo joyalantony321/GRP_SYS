@@ -1,0 +1,87 @@
+[
+  {
+    "id": "1784366492534",
+    "quote_number": "",
+    "revision_number": null,
+    "work_order_number": "0000",
+    "company_code": "CLX",
+    "customer_name": "FLATIRON GENERAL",
+    "customer_company_name": "Bingatti LLc",
+    "date": "2026-07-18",
+    "sales_person": "Anoop Mohan",
+    "subject": "",
+    "project_location": "ABU DHABI",
+    "list_id": 10,
+    "channel_id": 2,
+    "approved": false,
+    "terminated": false,
+    "completed_at": null,
+    "assigned_to": null,
+    "assigned_to_name": null,
+    "user_work_status": null,
+    "payment_percent": 0,
+    "schedule_type": "Delivery & Installation",
+    "schedule_stage": "Pending delivery",
+    "assignment_history": [],
+    "purchase_order_doc_name": "ER260720002124KHD.pdf",
+    "purchase_order_doc_url": "/files/serve/po/3f38cccf163946aaa638029284693a41.pdf",
+    "quotation_doc_name": null,
+    "quotation_doc_url": null,
+    "completion_doc_name": null,
+    "completion_doc_url": null,
+    "created_at": "2026-07-18T09:21:32.708715+00:00",
+    "updated_at": "2026-07-18T09:25:40.11664+00:00",
+    "tank_details": [
+      {
+        "id": "tank-1784366526195-1",
+        "label": "T1",
+        "width": "2",
+        "height": "1",
+        "length": "5",
+        "remarks": "",
+        "tankType": "NON-INS",
+        "itemDescription": ""
+      },
+      {
+        "id": "tank-1784366620080-2",
+        "label": "T2",
+        "width": "2",
+        "height": "1",
+        "length": "3",
+        "remarks": "",
+        "tankType": "NON-INS",
+        "itemDescription": ""
+      },
+      {
+        "id": "tank-1784366641147-3",
+        "label": "T3",
+        "width": "1",
+        "height": "1",
+        "length": "2",
+        "remarks": "",
+        "tankType": "NON-INS",
+        "itemDescription": ""
+      },
+      {
+        "id": "tank-1784366652812-4",
+        "label": "T4",
+        "width": "2",
+        "height": "1",
+        "length": "2.5",
+        "remarks": "",
+        "tankType": "NON-INS",
+        "itemDescription": ""
+      },
+      {
+        "id": "tank-1784366668576-5",
+        "label": "T5",
+        "width": "2",
+        "height": "2",
+        "length": "2",
+        "remarks": "",
+        "tankType": "NON-INS",
+        "itemDescription": ""
+      }
+    ]
+  }
+]

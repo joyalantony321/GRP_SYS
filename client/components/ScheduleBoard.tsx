@@ -8,7 +8,7 @@ import {
   X, Plus, ChevronLeft, ChevronRight, Truck, Wrench, Users,
   CheckCircle, MessageSquare, AlertTriangle, Zap, CalendarRange,
   ChevronDown, Check, FileText, ClipboardList, Search,
-  TrendingUp, Clock, ArrowUp, Maximize2,
+  TrendingUp, Clock, ArrowUp, Maximize2, RotateCcw, MapPin, Activity, Inbox,
 } from 'lucide-react';
 import { Card as WorkOrderCard, ChannelType, ScheduleStage, TankDetail } from '@/types';
 import { fetchCards, updateCard, fetchPendingReportDetails, generateDailyReports, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
@@ -41,16 +41,19 @@ interface ScTankProgress {
   tankDetailId: string;
   label: string;
   tankSize: string;
+  qty: string;
   itemDescription: string;
   tankType: '' | 'INS' | 'NON-INS';
   remarks: string;
-  // "Del. Start" / "Inst. Start" — the current-selection progress dropdown.
-  deliveryStatus: 'Not Delivered' | 'Partially Delivered' | 'Completed';
-  installationStatus: 'Not Started' | 'Partially Installed' | 'Completed';
-  // "Delivery Status" / "Installation Status" — free-text note, separate from the dropdown above.
+  // "Delivery Status" / "Installation Status" dropdown values.
+  deliveryStatus: 'Not scheduled' | 'Scheduled' | 'Partial delivery' | 'Fully delivered';
+  installationStatus: 'Not scheduled' | 'Scheduled' | 'Partial Installed' | 'Fully Installed';
   deliveryStatusText?: string;
   installationStatusText?: string;
   workers: string[];
+  // "Del. Date" / "Inst. Start" — editable, auto-stamped to today whenever the
+  // status moves away from "Not scheduled"; can still be edited manually after.
+  scheduledDate?: string;
   completionDate?: string;
 }
 
@@ -95,7 +98,6 @@ const INSTALLATION_PENDING = 'pending-installation';
 const INSTALLATION_STATUS = 'status-installation';
 const INSTALLATION_PLANNING = 'planning-installation';
 const ARCHIVE_COMPLETED = 'archive-completed';
-
 const isDeliveryListId = (listId: string) => listId.endsWith('-delivery');
 const isInstallationListId = (listId: string) => listId.endsWith('-installation');
 const isArchiveListId = (listId: string) => listId === ARCHIVE_COMPLETED;
@@ -103,8 +105,6 @@ const getPhaseForListId = (listId: string): SchedulePhase => (isInstallationList
 const getPendingListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PENDING : INSTALLATION_PENDING;
 const getStatusListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_STATUS : INSTALLATION_STATUS;
 const getPlanningListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PLANNING : INSTALLATION_PLANNING;
-
-const normalizeTankSize = (tank?: Partial<TankDetail>) => [tank?.length, tank?.width, tank?.height].filter(Boolean).join('x');
 
 const toTankProgress = (card: WorkOrderCard, existingById: Record<string, ScTankProgress> = {}): ScTankProgress[] => {
   const woTanks = card.tankDetails ?? [];
@@ -115,12 +115,14 @@ const toTankProgress = (card: WorkOrderCard, existingById: Record<string, ScTank
       tankDetailId: id,
       label: 'T1',
       tankSize: deriveTankSize(card) || '',
+      qty: existing?.qty ?? '1',
       itemDescription: '',
       tankType: '',
       remarks: existing?.remarks ?? '',
-      deliveryStatus: existing?.deliveryStatus ?? 'Not Delivered',
-      installationStatus: existing?.installationStatus ?? 'Not Started',
+      deliveryStatus: existing?.deliveryStatus ?? 'Not scheduled',
+      installationStatus: existing?.installationStatus ?? 'Not scheduled',
       workers: existing?.workers ?? [],
+      scheduledDate: existing?.scheduledDate,
       completionDate: existing?.completionDate,
     }];
   }
@@ -130,13 +132,15 @@ const toTankProgress = (card: WorkOrderCard, existingById: Record<string, ScTank
     return {
       tankDetailId: id,
       label: tank.label || `T${index + 1}`,
-      tankSize: normalizeTankSize(tank),
-      itemDescription: tank.itemDescription || '',
+      tankSize: tank.itemDescription || '',
+      qty: tank.qty || '1',
+      itemDescription: '',
       tankType: tank.tankType || '',
       remarks: existing?.remarks ?? (tank.remarks || ''),
-      deliveryStatus: existing?.deliveryStatus ?? 'Not Delivered',
-      installationStatus: existing?.installationStatus ?? 'Not Started',
+      deliveryStatus: existing?.deliveryStatus ?? 'Not scheduled',
+      installationStatus: existing?.installationStatus ?? 'Not scheduled',
       workers: existing?.workers ?? [],
+      scheduledDate: existing?.scheduledDate,
       completionDate: existing?.completionDate,
     };
   });
@@ -228,6 +232,25 @@ const getCardGanttDays = (card: ScCard, maxDays = 14) => {
 
 const flattenCards = (store: ScStore): ScCard[] => Object.values(store).flat();
 
+/** Pending must always hold the full, permanent set of cards for a phase.
+ * While a card is actively being worked on in Planning/Status, Pending shows
+ * a live duplicate of it (kept up to date on every render) so it never goes
+ * missing; Status/Planning are cleared out at the next daily reset while
+ * Pending's own copy (upserted at that point) persists. */
+const mirrorPendingWithSources = (store: ScStore, phase: SchedulePhase): ScCard[] => {
+  const pendingId = getPendingListForPhase(phase);
+  const statusId = getStatusListForPhase(phase);
+  const planningId = getPlanningListForPhase(phase);
+  const byIdentity = new Map<string, ScCard>();
+  (store[pendingId] ?? []).forEach(card => byIdentity.set(getCardIdentity(card), card));
+  [...(store[statusId] ?? []), ...(store[planningId] ?? [])].forEach(card => {
+    // Keep the card's true listId (status-*/planning-*) so callers can tell
+    // a mirrored duplicate apart from a genuine pending-only entry.
+    byIdentity.set(getCardIdentity(card), card);
+  });
+  return Array.from(byIdentity.values());
+};
+
 /**
  * Best-effort reconstruction of "what the schedule looked like on a given
  * past/future date" for the read-only date search feature. We don't keep a
@@ -295,36 +318,36 @@ const collectCardByIdentity = (store: ScStore): Record<string, ScCard> => {
 const isCardCompleteForPhase = (card: ScCard, phase: SchedulePhase): boolean => {
   const tanks = card.tanks ?? [];
   if (tanks.length === 0) {
-    if (phase === 'delivery') return card.deliveryStatus === 'Completed';
-    return card.installationStatus === 'Completed' || !!card.completedDate;
+    if (phase === 'delivery') return card.deliveryStatus === 'Fully delivered' || card.deliveryStatus === 'Completed';
+    return card.installationStatus === 'Fully Installed' || card.installationStatus === 'Completed' || !!card.completedDate;
   }
-  if (phase === 'delivery') return tanks.every(t => t.deliveryStatus === 'Completed');
-  return tanks.every(t => t.installationStatus === 'Completed');
+  if (phase === 'delivery') return tanks.every(t => t.deliveryStatus === 'Fully delivered');
+  return tanks.every(t => t.installationStatus === 'Fully Installed');
 };
 
 const getTanksLeftForPhase = (card: ScCard, phase: SchedulePhase): number => {
   const tanks = card.tanks ?? [];
   if (tanks.length === 0) return isCardCompleteForPhase(card, phase) ? 0 : 1;
-  if (phase === 'delivery') return tanks.filter(t => t.deliveryStatus !== 'Completed').length;
-  return tanks.filter(t => t.installationStatus !== 'Completed').length;
+  if (phase === 'delivery') return tanks.filter(t => t.deliveryStatus !== 'Fully delivered').length;
+  return tanks.filter(t => t.installationStatus !== 'Fully Installed').length;
 };
 
 const getPhaseStatusLabel = (card: ScCard, phase: SchedulePhase): string => {
   const tanks = card.tanks ?? [];
   if (tanks.length === 0) {
-    if (phase === 'delivery') return card.deliveryStatus || 'Not Delivered';
-    return card.installationStatus || 'Not Started';
+    if (phase === 'delivery') return card.deliveryStatus || 'Not scheduled';
+    return card.installationStatus || 'Not scheduled';
   }
   const completed = getTanksLeftForPhase(card, phase) === 0;
-  if (completed) return 'Completed';
+  if (completed) return phase === 'delivery' ? 'Fully delivered' : 'Fully Installed';
   if (phase === 'delivery') {
-    return tanks.some(t => t.deliveryStatus === 'Partially Delivered' || t.deliveryStatus === 'Completed')
-      ? 'Partial Delivery'
-      : 'Not Delivered';
+    return tanks.some(t => t.deliveryStatus === 'Partial delivery' || t.deliveryStatus === 'Scheduled' || t.deliveryStatus === 'Fully delivered')
+      ? 'Partial delivery'
+      : 'Not scheduled';
   }
-  return tanks.some(t => t.installationStatus === 'Partially Installed' || t.installationStatus === 'Completed')
-    ? 'Partially Installed'
-    : 'Not Started';
+  return tanks.some(t => t.installationStatus === 'Partial Installed' || t.installationStatus === 'Scheduled' || t.installationStatus === 'Fully Installed')
+    ? 'Partial Installed'
+    : 'Not scheduled';
 };
 
 const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
@@ -547,8 +570,8 @@ const pBg    = (p: number) => p === 0 ? '#fef2f2' : p < 50 ? '#fefce8' : p < 100
 /** Distinct colour per tank status value: gray = not started/not delivered,
  * amber = partially delivered/installed, green = completed. */
 const tankStatusColorClass = (s: string) => {
-  if (s === 'Completed') return 'bg-emerald-100 border-emerald-300 text-emerald-700';
-  if (s === 'Partially Delivered' || s === 'Partially Installed') return 'bg-amber-100 border-amber-300 text-amber-700';
+  if (s === 'Fully delivered' || s === 'Fully Installed' || s === 'Completed') return 'bg-emerald-100 border-emerald-300 text-emerald-700';
+  if (s === 'Partial delivery' || s === 'Partial Installed' || s === 'Scheduled') return 'bg-amber-100 border-amber-300 text-amber-700';
   return 'bg-gray-100 border-gray-300 text-gray-600';
 };
 
@@ -586,7 +609,7 @@ const getMatrixTemplateColumns = (columns: MatrixColumn[]) => {
 };
 
 /** Landing-page card columns (before expanding): WO No, Payment, Customer,
- * Brand, Location, Tanks Left, Del. Person (delivery rows only), Tanks. */
+ * Brand, Location, Tanks/Materials. */
 const getMatrixColumns = (_listId: string, phase: SchedulePhase): MatrixColumn[] => {
   const cols: MatrixColumn[] = [
     { key: 'wo', label: 'WO No' },
@@ -594,12 +617,8 @@ const getMatrixColumns = (_listId: string, phase: SchedulePhase): MatrixColumn[]
     { key: 'customer', label: 'Customer' },
     { key: 'brand', label: 'Brand' },
     { key: 'location', label: 'Location' },
-    { key: 'tanks', label: 'Tanks Left' },
   ];
-  if (phase === 'delivery') {
-    cols.push({ key: 'delPerson', label: 'Del. Person' });
-  }
-  cols.push({ key: 'tankBreakdown', label: 'Tanks' });
+  cols.push({ key: 'tankBreakdown', label: 'Tanks/Materials' });
   return cols;
 };
 
@@ -655,7 +674,7 @@ const getMatrixCellValue = (card: ScCard, listId: string, phase: SchedulePhase, 
 /* ─── CardChip – used in BOTH date columns AND pending ───────────────────── */
 
 function CardChip({
-  card, listId, index, isPending, onOpen, isDragDisabled,
+  card, listId, index, isPending, onOpen, isDragDisabled, dragKey,
 }: {
   card: ScCard;
   listId: string;
@@ -663,12 +682,12 @@ function CardChip({
   isPending?: boolean;
   onOpen: () => void;
   isDragDisabled?: boolean;
+  dragKey?: string;
 }) {
   const [tipPos, setTipPos] = useState<{x:number;y:number}|null>(null);
   const woCode = normalizeWoCode(card.woCode);
   const dot = isPending ? pendDot(card) : dateDot(card);
   const showDot = Boolean(dot);
-  const chipBg = pBg(card.paymentPercent);
   const phase = getPhaseForListId(listId);
   const columns = getMatrixColumns(listId, phase);
   const gridTemplateColumns = getMatrixTemplateColumns(columns);
@@ -676,8 +695,12 @@ function CardChip({
   const payPct = card.paymentPercent ?? 0;
 
   return (
-    <Draggable draggableId={card.id} index={index} isDragDisabled={isDragDisabled}>
-      {(prov, snap) => (
+    <Draggable draggableId={dragKey ?? card.id} index={index} isDragDisabled={isDragDisabled}>
+      {(prov, snap) => {
+        // The card is unmounted/repositioned by the DnD library mid-drag, so
+        // onMouseLeave never fires on drop — clear the stuck tooltip here instead.
+        if (snap.isDragging && tipPos) setTipPos(null);
+        return (
         <>
           <div
             ref={prov.innerRef}
@@ -687,83 +710,57 @@ function CardChip({
             onMouseEnter={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
             onMouseMove={e => { if(!snap.isDragging) setTipPos({x:e.clientX,y:e.clientY}); }}
             onMouseLeave={() => setTipPos(null)}
-            className={`rounded-lg border cursor-grab select-none transition-all mb-1 min-w-0 px-2 py-1.5
-              ${card.isEmergency ? 'ring-1 ring-red-300' : ''}
-              ${snap.isDragging ? 'shadow-lg opacity-90 rotate-[0.5deg]' : 'hover:shadow-md hover:-translate-y-px'}`}
+            className={`group relative rounded-lg bg-white border cursor-grab select-none transition-all mb-1 min-w-0 pl-2.5 pr-2 py-1.5
+              ${card.isEmergency ? 'border-red-200 ring-1 ring-red-100' : 'border-gray-200 hover:border-gray-300'}
+              ${snap.isDragging ? 'shadow-lg opacity-90 rotate-[0.5deg]' : 'hover:shadow-[0_2px_10px_rgba(15,23,42,0.06)] hover:-translate-y-px'}`}
             style={{
               ...(prov.draggableProps.style as React.CSSProperties),
-              backgroundColor: chipBg,
-              borderColor: card.isEmergency ? '#ef4444' : '#d1d5db',
+              borderLeft: `3px solid ${card.isEmergency ? '#ef4444' : pColor(payPct)}`,
             }}
           >
-            <div className="grid gap-1 min-w-0 items-center" style={{ gridTemplateColumns }}>
+            <div className="grid gap-1.5 min-w-0 items-center" style={{ gridTemplateColumns }}>
               {columns.map(col => {
                 const value = getMatrixCellValue(card, listId, phase, col.key);
                 const isWo = col.key === 'wo';
                 const isTankBreakdown = col.key === 'tankBreakdown';
                 if (isTankBreakdown) {
-                  const tanks = card.tanks ?? [];
-                  const statusPillClass = (s?: string) => {
-                    if (s === 'Completed') return 'bg-emerald-100 text-emerald-700';
-                    if (s === 'Partially Delivered' || s === 'Partially Installed') return 'bg-amber-100 text-amber-700';
-                    return 'bg-gray-100 text-gray-500';
-                  };
+                  const tankCount = (card.tanks ?? []).length || 1;
                   return (
-                    <div key={col.key} className="text-[11px] leading-4 text-gray-700 min-w-0 relative">
-                      <details onClick={e => e.stopPropagation()} className="group">
-                        <summary className="cursor-pointer list-none inline-flex items-center gap-1 whitespace-nowrap text-[10px] text-indigo-700 font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                          Tanks ({tanks.length || 1})
-                          <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180 flex-shrink-0" />
-                        </summary>
-                        <div className="absolute right-0 top-full mt-1.5 z-30 w-64 max-h-64 overflow-y-auto rounded-xl border border-gray-100 bg-white p-2 space-y-1.5 shadow-xl">
-                          {(tanks.length > 0 ? tanks : [{
-                            tankDetailId: 'base',
-                            label: 'T1',
-                            tankSize: card.tankSize || '-',
-                            itemDescription: '',
-                            tankType: '',
-                            remarks: '',
-                            deliveryStatus: (card.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
-                            installationStatus: (card.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
-                            workers: card.workers ?? [],
-                            completionDate: card.completedDate || card.confirmedDate,
-                          }]).map(t => {
-                            const phaseStatus = phase === 'delivery' ? t.deliveryStatus : t.installationStatus;
-                            const showWorkerDate = phase === 'installation' && phaseStatus !== 'Not Started';
-                            const workerText = (t.workers?.length ? t.workers.join(', ') : (card.workers ?? []).join(', ')) || '-';
-                            const dateText = t.completionDate || card.completedDate || card.confirmedDate;
-                            return (
-                              <div key={t.tankDetailId} className="rounded-lg border border-gray-100 bg-gray-50 p-2 space-y-0.5">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold text-gray-800 truncate">{t.label} • {t.tankSize || '-'}</span>
-                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${statusPillClass(phaseStatus)}`}>{phaseStatus}</span>
-                                </div>
-                                <div className="text-gray-500 truncate">Item: <span className="text-gray-700">{t.itemDescription || '-'}</span></div>
-                                <div className="text-gray-500">Type: <span className="text-gray-700">{t.tankType || '-'}</span></div>
-                                {showWorkerDate && (
-                                  <div className="text-gray-500 truncate">
-                                    Workers: <span className="text-gray-700">{workerText}</span>{dateText ? <span className="text-gray-400"> · {dateText}</span> : ''}
-                                  </div>
-                                )}
-                                <div className="text-gray-500 truncate">Remarks: <span className="text-gray-700">{t.remarks || '-'}</span></div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </details>
+                    <div key={col.key} className="text-[11px] leading-4 text-gray-700 min-w-0 text-center font-semibold">
+                      {tankCount}
                     </div>
                   );
                 }
                 return (
-                  <div key={col.key} className="text-[10px] leading-4 text-gray-700 truncate min-w-0">
+                  <div key={col.key} className="text-[10px] leading-4 text-gray-600 truncate min-w-0">
                     {isWo ? (
                       <span className="inline-flex items-center gap-1">
                         {showDot && <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />}
-                        <span className="font-semibold text-gray-800 truncate">{value}</span>
-                        {card.isEmergency && <ArrowUp className="w-3 h-3 text-red-500 flex-shrink-0" />}
+                        <span className="font-bold text-slate-800 truncate">#{value}</span>
+                        {card.isEmergency && (
+                          <span className="inline-flex items-center gap-0.5 flex-shrink-0 text-[8px] font-bold text-red-600 bg-red-50 border border-red-200 rounded px-1 py-0.5">
+                            <AlertTriangle className="w-2.5 h-2.5" />URGENT
+                          </span>
+                        )}
                       </span>
                     ) : col.key === 'payment' ? (
-                      <span className="font-bold" style={{ color: pColor(payPct) }}>{value}</span>
+                      <span
+                        className="inline-flex items-center justify-center font-bold text-[9px] px-1.5 py-0.5 rounded-md whitespace-nowrap"
+                        style={{ color: pColor(payPct), backgroundColor: pBg(payPct), border: `1px solid ${pBorder(payPct)}` }}
+                      >
+                        {value}
+                      </span>
+                    ) : col.key === 'brand' ? (
+                      value === '-' ? <span className="text-gray-300">-</span> : (
+                        <span className="inline-flex items-center text-[9px] font-semibold uppercase tracking-wide text-slate-600 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 whitespace-nowrap">
+                          {value}
+                        </span>
+                      )
+                    ) : col.key === 'location' ? (
+                      <span className="inline-flex items-center gap-1 min-w-0">
+                        <MapPin className="w-2.5 h-2.5 text-gray-300 flex-shrink-0" />
+                        <span className="truncate">{value}</span>
+                      </span>
                     ) : (
                       value
                     )}
@@ -799,28 +796,38 @@ function CardChip({
             </div>
           )}
         </>
-      )}
+      );}}
     </Draggable>
   );
 }
 
-function MatrixColumnHeader({ listId, phase, onExpand }: { listId: string; phase: SchedulePhase; onExpand?: () => void }) {
+function MatrixColumnHeader({ listId, phase, count, onExpand }: { listId: string; phase: SchedulePhase; count: number; onExpand?: () => void }) {
   const columns = getMatrixColumns(listId, phase);
   const gridTemplateColumns = getMatrixTemplateColumns(columns);
+  const kind = getListKind(listId);
+  const meta = LIST_KIND_META[kind];
+  const KindIcon = meta.icon;
   return (
-    <div className="sticky top-0 z-10 border-b border-gray-200 bg-gray-50 relative">
-      {onExpand && (
-        <button
-          onClick={onExpand}
-          title="Expand to fullscreen"
-          className="absolute top-1 right-1 z-20 p-0.5 rounded-md bg-white border border-gray-200 text-gray-400 hover:text-purple-600 hover:border-purple-300 shadow-sm"
-        >
-          <Maximize2 className="w-3 h-3" />
-        </button>
-      )}
-      <div className="grid gap-1.5 px-2 py-1.5 items-start" style={{ gridTemplateColumns }}>
+    <div className="sticky top-0 z-10 border-b border-gray-200 bg-white">
+      <div className={`flex items-center justify-between gap-1.5 px-2 pt-1.5 pb-1 ${meta.bg}`}>
+        <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${meta.accent}`}>
+          <KindIcon className="w-3 h-3" />
+          {meta.label}
+          <span className={`ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold bg-white/80 ${meta.accent}`}>{count}</span>
+        </span>
+        {onExpand && (
+          <button
+            onClick={onExpand}
+            title="Expand to fullscreen"
+            className="p-0.5 rounded-md bg-white/80 border border-white/60 text-gray-400 hover:text-purple-600 hover:border-purple-300 shadow-sm transition-colors"
+          >
+            <Maximize2 className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      <div className="grid gap-1.5 px-2 py-1.5 items-start border-t border-gray-100 bg-gray-50/60" style={{ gridTemplateColumns }}>
         {columns.map(col => (
-          <div key={col.key} className="text-[9px] font-bold text-gray-500 uppercase tracking-wide leading-[1.1] break-words">{col.label}</div>
+          <div key={col.key} className="text-[9px] font-bold text-gray-500 uppercase tracking-wide leading-[1.1] break-normal">{col.label}</div>
         ))}
       </div>
     </div>
@@ -836,12 +843,53 @@ const MATRIX_LIST_TITLES: Record<string, string> = {
   'planning-installation': 'Planning Installation',
 };
 
+type ListKind = 'pending' | 'status' | 'planning';
+const getListKind = (listId: string): ListKind =>
+  listId.startsWith('pending-') ? 'pending' : listId.startsWith('status-') ? 'status' : 'planning';
+const LIST_KIND_META: Record<ListKind, { label: string; icon: typeof Clock; accent: string; bg: string }> = {
+  pending:  { label: 'Pending',      icon: Clock,        accent: 'text-amber-600',  bg: 'bg-amber-50/70' },
+  status:   { label: 'In Progress',  icon: Activity,     accent: 'text-blue-600',   bg: 'bg-blue-50/70' },
+  planning: { label: 'Planning',     icon: CalendarRange, accent: 'text-violet-600', bg: 'bg-violet-50/70' },
+};
+
+const DELIVERY_STATUS_OPTIONS: ScTankProgress['deliveryStatus'][] = ['Not scheduled', 'Scheduled', 'Partial delivery', 'Fully delivered'];
+const INSTALLATION_STATUS_OPTIONS: ScTankProgress['installationStatus'][] = ['Not scheduled', 'Scheduled', 'Partial Installed', 'Fully Installed'];
+
+const getRowTanks = (card: ScCard): ScTankProgress[] => (card.tanks?.length ? card.tanks : [{
+  tankDetailId: 'base',
+  label: 'T1',
+  tankSize: card.tankSize || '-',
+  qty: '1',
+  itemDescription: '',
+  tankType: '' as ScTankProgress['tankType'],
+  remarks: card.sectionRemarks || '',
+  deliveryStatus: (card.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not scheduled',
+  installationStatus: (card.installationStatus as ScTankProgress['installationStatus']) || 'Not scheduled',
+  workers: card.workers ?? [],
+  scheduledDate: card.confirmedDate,
+  completionDate: undefined,
+}]);
+
 /* ─── Fullscreen expand modal for the 6 schedule matrix boxes ─────────────── */
-function MatrixFullscreenModal({ listId, phase, cards, onOpenCard, onClose }: {
-  listId: string; phase: SchedulePhase; cards: ScCard[]; onOpenCard: (card: ScCard) => void; onClose: () => void;
+/* Cells are edited directly inline here — this is the only place schedule
+ * tank/work-order rows can be edited from the matrix boxes; opening a
+ * separate "card details" modal from these tables has been removed. */
+function MatrixFullscreenModal({ listId, phase, cards, referenceDate, canEdit, onUpdateCard, onDeleteCard, onClose }: {
+  listId: string; phase: SchedulePhase; cards: ScCard[]; referenceDate: string; canEdit: boolean;
+  onUpdateCard: (card: ScCard) => void; onDeleteCard: (card: ScCard) => void; onClose: () => void;
 }) {
   const isDelivery = phase === 'delivery';
+  const isPending = listId.startsWith('pending-');
   const title = MATRIX_LIST_TITLES[listId] || listId;
+  const colCount = (isDelivery ? 13 : 14) + (isPending ? 1 : 0);
+  // Auto-grow editable text inputs to fit their content (min width in ch units)
+  // so Remarks/Workers are never clipped; the table itself scrolls horizontally.
+  const fitWidth = (value: string, min = 10) => ({ width: `${Math.max(min, value.length + 2)}ch` });
+
+  const setTank = (card: ScCard, tankDetailId: string, updater: (tank: ScTankProgress) => ScTankProgress) => {
+    const tanks = getRowTanks(card).map(t => t.tankDetailId === tankDetailId ? updater(t) : t);
+    onUpdateCard({ ...card, tanks });
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
@@ -849,71 +897,141 @@ function MatrixFullscreenModal({ listId, phase, cards, onOpenCard, onClose }: {
         <div className={`flex items-center justify-between px-5 py-3 text-white flex-shrink-0 ${isDelivery ? 'bg-gradient-to-r from-amber-600 to-amber-500' : 'bg-gradient-to-r from-indigo-600 to-indigo-500'}`}>
           <div>
             <h2 className="text-base font-bold">{title}</h2>
-            <p className="text-xs opacity-80">{cards.length} work order{cards.length !== 1 ? 's' : ''} · click a row to open card details</p>
+            <p className="text-xs opacity-80">
+              {cards.length} work order{cards.length !== 1 ? 's' : ''}
+              {canEdit ? ` · edit ${isDelivery ? 'Del. Date, Delivery Status and Remarks' : 'Inst. Start, Installation Status, Workers and Remarks'} directly in the table` : ' · read-only'}
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
         <div className="flex-1 overflow-auto p-4">
-          <table className="w-full border-collapse text-xs">
+          <table className="border-collapse text-xs table-auto">
             <thead className="sticky top-0 z-10">
+              {/* Column order mirrors the source Delivery/Installation Pending|Planning|Status CSV exports.
+                  Columns size to their widest cell content (table-auto) instead of stretching to fill the modal. */}
               <tr className="bg-gray-100 text-gray-600 uppercase text-[10px] tracking-wide">
-                <th className="border border-gray-200 px-2 py-2 text-left">WO No</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">Customer</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">Brand</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">Location</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">Tank Size</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">Type</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Del. Date' : 'Inst. Start'}</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Del. Start' : 'Inst. Start Status'}</th>
-                <th className="border border-gray-200 px-2 py-2 text-left">{isDelivery ? 'Delivery Status' : 'Installation Status'}</th>
-                {!isDelivery && <th className="border border-gray-200 px-2 py-2 text-left">Workers</th>}
-                <th className="border border-gray-200 px-2 py-2 text-left">Remarks</th>
+                <th className="sticky left-0 z-20 border border-gray-200 bg-gray-100 px-2 py-2 text-left whitespace-nowrap shadow-[2px_0_4px_rgba(0,0,0,0.08)]">WO No</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Payment</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Customer</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Brand</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Location</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">TANK SIZE/MATERIAL</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Qty</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Type</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">{isDelivery ? 'Del. Date' : 'Inst. Start'}</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">{isDelivery ? 'Delivery Status' : 'Installation Status'}</th>
+                {!isDelivery && <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Workers</th>}
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Contact Person</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Phone Number</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Sales Person</th>
+                <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Remarks</th>
+                {isPending && <th className="border border-gray-200 px-2 py-2 text-left whitespace-nowrap">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {cards.length === 0 && (
                 <tr>
-                  <td colSpan={isDelivery ? 10 : 11} className="border border-gray-200 px-2 py-6 text-center text-gray-300 italic">No cards</td>
+                  <td colSpan={colCount} className="border border-gray-200 px-2 py-6 text-center text-gray-300 italic">No cards</td>
                 </tr>
               )}
               {cards.map((card, cardIdx) => {
-                const tanks = (card.tanks?.length ? card.tanks : [{
-                  tankDetailId: 'base',
-                  label: 'T1',
-                  tankSize: card.tankSize || '-',
-                  itemDescription: '',
-                  tankType: '' as ScTankProgress['tankType'],
-                  remarks: card.sectionRemarks || '',
-                  deliveryStatus: (card.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
-                  installationStatus: (card.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
-                  workers: card.workers ?? [],
-                  completionDate: undefined,
-                }]);
-                const rowBg = cardIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50';
+                const tanks = getRowTanks(card);
+                const rowBg = cardIdx % 2 === 0 ? 'bg-white' : (card.isEmergency ? 'bg-red-50' : 'bg-slate-50');
                 return tanks.map((t, i) => {
                   const phaseStatus = isDelivery ? t.deliveryStatus : t.installationStatus;
-                  const phaseStatusText = isDelivery
-                    ? (t.deliveryStatusText || card.deliveryStatus || '-')
-                    : (t.installationStatusText || card.installationStatus || '-');
+                  const statusOptions = isDelivery ? DELIVERY_STATUS_OPTIONS : INSTALLATION_STATUS_OPTIONS;
+                  const qtyText = t.qty || '1';
+                  const workersText = (t.workers?.length ? t.workers : (card.workers ?? [])).join(', ');
                   return (
-                    <tr key={`${card.id}-${t.tankDetailId}`} onClick={() => onOpenCard(card)} className={`${rowBg} hover:bg-purple-50 cursor-pointer`}>
+                    <tr key={`${card.id}-${t.tankDetailId}`} className={`${rowBg} ${card.isEmergency ? 'ring-1 ring-inset ring-red-300' : ''}`}>
                       {i === 0 && (
                         <>
-                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top font-semibold text-gray-800">{normalizeWoCode(card.woCode)}</td>
-                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.customer || '-'}</td>
-                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.brand || '-'}</td>
-                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700">{card.location || '-'}</td>
+                          <td rowSpan={tanks.length} className={`sticky left-0 z-10 border border-gray-200 px-2 py-2 align-top font-semibold text-gray-800 whitespace-nowrap shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${rowBg}`}>
+                            {card.isEmergency && <AlertTriangle className="inline w-3 h-3 text-red-500 mr-1" />}
+                            {normalizeWoCode(card.woCode)}
+                          </td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top font-semibold whitespace-nowrap" style={{ color: pColor(card.paymentPercent ?? 0) }}>
+                            {card.paymentPercent ?? 0}%
+                          </td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700 whitespace-nowrap">{card.customer || '-'}</td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700 whitespace-nowrap">{card.brand || '-'}</td>
+                          <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-gray-700 whitespace-nowrap">{card.location || '-'}</td>
                         </>
                       )}
-                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.tankSize || '-'}</td>
-                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.tankType || '-'}</td>
-                      <td className="border border-gray-200 px-2 py-2 text-gray-500">{t.completionDate || '-'}</td>
-                      <td className={`border border-gray-200 px-2 py-2 font-semibold ${tankStatusColorClass(phaseStatus)}`}>{phaseStatus}</td>
-                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{phaseStatusText}</td>
-                      {!isDelivery && <td className="border border-gray-200 px-2 py-2 text-gray-700">{(t.workers?.length ? t.workers : (card.workers ?? [])).join(', ') || '-'}</td>}
-                      <td className="border border-gray-200 px-2 py-2 text-gray-700">{t.remarks || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{t.tankSize || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{qtyText}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{t.tankType || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-500 whitespace-nowrap">
+                        <input
+                          type="date"
+                          value={t.scheduledDate || ''}
+                          disabled={!canEdit}
+                          onChange={e => setTank(card, t.tankDetailId, prev => ({ ...prev, scheduledDate: e.target.value || undefined }))}
+                          className="px-1 py-0.5 border border-gray-200 rounded text-[11px] disabled:bg-transparent disabled:border-transparent"
+                        />
+                      </td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">
+                        <select
+                          value={phaseStatus}
+                          disabled={!canEdit}
+                          onChange={e => {
+                            const newStatus = e.target.value as ScTankProgress['deliveryStatus'] & ScTankProgress['installationStatus'];
+                            setTank(card, t.tankDetailId, prev => ({
+                              ...prev,
+                              deliveryStatus: isDelivery ? (newStatus as ScTankProgress['deliveryStatus']) : prev.deliveryStatus,
+                              installationStatus: !isDelivery ? (newStatus as ScTankProgress['installationStatus']) : prev.installationStatus,
+                              scheduledDate: newStatus === 'Not scheduled' ? undefined : referenceDate,
+                            }));
+                          }}
+                          className={`px-1.5 py-0.5 border rounded-md text-[11px] font-semibold ${tankStatusColorClass(phaseStatus)} disabled:opacity-70`}
+                        >
+                          {statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                      </td>
+                      {!isDelivery && (
+                        <td className="border border-gray-200 px-2 py-2 text-gray-700">
+                          <input
+                            type="text"
+                            defaultValue={workersText}
+                            disabled={!canEdit}
+                            onBlur={e => {
+                              const workers = e.target.value.split(',').map(w => w.trim()).filter(Boolean);
+                              setTank(card, t.tankDetailId, prev => ({ ...prev, workers }));
+                            }}
+                            placeholder="Comma-separated names"
+                            style={fitWidth(workersText, 16)}
+                            className="px-1 py-0.5 border border-gray-200 rounded text-[11px] disabled:bg-transparent disabled:border-transparent"
+                          />
+                        </td>
+                      )}
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{card.contactPerson || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{card.phone || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 whitespace-nowrap">{card.salesPerson || '-'}</td>
+                      <td className="border border-gray-200 px-2 py-2 text-gray-700 max-w-[220px]">
+                        <textarea
+                          defaultValue={t.remarks || ''}
+                          disabled={!canEdit}
+                          onBlur={e => setTank(card, t.tankDetailId, prev => ({ ...prev, remarks: e.target.value }))}
+                          placeholder="Remarks"
+                          rows={2}
+                          className="w-52 px-1 py-0.5 border border-gray-200 rounded text-[11px] whitespace-normal break-normal resize-y disabled:bg-transparent disabled:border-transparent"
+                        />
+                      </td>
+                      {isPending && i === 0 && (
+                        <td rowSpan={tanks.length} className="border border-gray-200 px-2 py-2 align-top text-center whitespace-nowrap">
+                          {canEdit && (
+                            <button
+                              title="Remove from schedule (moves the Work Order to Payments)"
+                              onClick={() => onDeleteCard(card)}
+                              className="p-1 rounded-md text-red-500 hover:bg-red-50 hover:text-red-700"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 });
@@ -1185,7 +1303,7 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
     : 'bg-slate-100 text-slate-700 border-slate-200';
 
   const infoFields = [
-    { label: 'Tank Size',      value: ec.tankSize    || '—' },
+    { label: 'Tank Size/Material', value: ec.tankSize    || '—' },
     { label: 'Brand',          value: ec.brand       || '—' },
     { label: 'Type',           value: ec.productType || '—' },
     { label: 'Contact Person', value: ec.contactPerson || '—' },
@@ -1199,11 +1317,12 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
       tankDetailId: 'base',
       label: 'T1',
       tankSize: cardState.tankSize || '-',
+      qty: '1',
       itemDescription: '',
       tankType: '',
       remarks: '',
-      deliveryStatus: (cardState.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not Delivered',
-      installationStatus: (cardState.installationStatus as ScTankProgress['installationStatus']) || 'Not Started',
+      deliveryStatus: (cardState.deliveryStatus as ScTankProgress['deliveryStatus']) || 'Not scheduled',
+      installationStatus: (cardState.installationStatus as ScTankProgress['installationStatus']) || 'Not scheduled',
       workers: cardState.workers ?? [],
       completionDate: cardState.completedDate || cardState.confirmedDate,
     }];
@@ -1277,35 +1396,31 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
                   <div className="flex items-center gap-3 text-xs">
                     <span className="font-bold text-gray-800 whitespace-nowrap">{tank.label} • {tank.tankSize || '-'}</span>
                     <span className="h-4 w-px bg-gray-200 flex-shrink-0" />
-                    <span className="truncate text-gray-600"><span className="text-gray-400">Item:</span> {tank.itemDescription || '-'}</span>
+                    <span className="truncate text-gray-600"><span className="text-gray-400">Qty:</span> {tank.qty || '1'}</span>
                     <span className="truncate text-gray-600"><span className="text-gray-400">Type:</span> {tank.tankType || '-'}</span>
                   </div>
                   <div className="text-xs text-gray-600 break-words">
                     <span className="text-gray-400">Remarks:</span> {tank.remarks || '-'}
                   </div>
+                  {currentPhase === 'installation' && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">Installation Status</span>
+                      <input
+                        type="text"
+                        value={tank.installationStatusText || ''}
+                        disabled={isReadOnly}
+                        onChange={e => {
+                          const text = e.target.value;
+                          updateTank(tank.tankDetailId, prev => ({ ...prev, installationStatusText: text }));
+                        }}
+                        placeholder="Write installation status"
+                        className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded-md text-xs bg-white text-gray-700"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">
-                      {currentPhase === 'delivery' ? 'Delivery Status' : 'Installation Status'}
-                    </span>
-                    <input
-                      type="text"
-                      value={(currentPhase === 'delivery' ? tank.deliveryStatusText : tank.installationStatusText) || ''}
-                      disabled={isReadOnly}
-                      onChange={e => {
-                        const text = e.target.value;
-                        updateTank(tank.tankDetailId, prev => (
-                          currentPhase === 'delivery'
-                            ? { ...prev, deliveryStatusText: text }
-                            : { ...prev, installationStatusText: text }
-                        ));
-                      }}
-                      placeholder={currentPhase === 'delivery' ? 'Write delivery status' : 'Write installation status'}
-                      className="flex-1 min-w-0 px-2 py-1 border border-gray-200 rounded-md text-xs bg-white text-gray-700"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold text-gray-500 whitespace-nowrap">
-                      {currentPhase === 'delivery' ? 'Del. Start' : 'Inst. Start'}
+                      {currentPhase === 'delivery' ? 'Delivery Status' : 'Inst. Start'}
                     </span>
                     {currentPhase === 'delivery' ? (
                       <select
@@ -1317,17 +1432,15 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
                             ...prev,
                             deliveryStatus: newStatus,
                             // Stamp today's date whenever the tank progresses past "Not
-                            // Delivered"; once Completed, the date is frozen and never changes again.
-                            completionDate: prev.deliveryStatus === 'Completed'
+                            // scheduled"; once Fully delivered, the date is frozen and never changes again.
+                            completionDate: prev.deliveryStatus === 'Fully delivered'
                               ? prev.completionDate
-                              : (newStatus === 'Not Delivered' ? prev.completionDate : referenceDate),
+                              : (newStatus === 'Not scheduled' ? prev.completionDate : referenceDate),
                           }));
                         }}
                         className={`flex-shrink-0 px-2 py-1 border rounded-md text-xs font-semibold ${tankStatusColorClass(tank.deliveryStatus)}`}
                       >
-                        <option value="Not Delivered">Not Delivered</option>
-                        <option value="Partially Delivered">Partially Delivered</option>
-                        <option value="Completed">Completed</option>
+                        {DELIVERY_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                       </select>
                     ) : (
                       <select
@@ -1339,19 +1452,20 @@ function CardDetailModal({ card, listId, onClose, onSave, canEdit, referenceDate
                             ...prev,
                             installationStatus: newStatus,
                             // Stamp today's date whenever the tank progresses past "Not
-                            // Started"; once Completed, the date is frozen and never changes again.
-                            completionDate: prev.installationStatus === 'Completed'
+                            // scheduled"; once Fully Installed, the date is frozen and never changes again.
+                            completionDate: prev.installationStatus === 'Fully Installed'
                               ? prev.completionDate
-                              : (newStatus === 'Not Started' ? prev.completionDate : referenceDate),
+                              : (newStatus === 'Not scheduled' ? prev.completionDate : referenceDate),
                           }));
                         }}
                         className={`flex-shrink-0 px-2 py-1 border rounded-md text-xs font-semibold ${tankStatusColorClass(tank.installationStatus)}`}
                       >
-                        <option value="Not Started">Not Started</option>
-                        <option value="Partially Installed">Partially Installed</option>
-                        <option value="Completed">Completed</option>
+                        {INSTALLATION_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                       </select>
                     )}
+                    <span className="text-[10px] text-gray-400 whitespace-nowrap ml-auto">
+                      {currentPhase === 'delivery' ? 'Del. Date:' : 'Inst. Date:'} {tank.completionDate || '-'}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -1715,11 +1829,6 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const instRef    = useRef<HTMLDivElement>(null);
   const chDropRef  = useRef<HTMLDivElement>(null);
   const ganttAutoFitRef = useRef(true);
-  // Sentinel (not a real date) forces the daily-reset effect to run once the
-  // schedule store finishes loading, even on a fresh page reload where
-  // `referenceDate` is initialized directly to "today" — otherwise stranded
-  // completed cards from a previous day never get archived/reset.
-  const lastProcessedReferenceDateRef = useRef<string>('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workOrderCardsRef = useRef<WorkOrderCard[]>([]);
   const syncedSignatureRef = useRef<Record<string, string>>({});
@@ -1855,6 +1964,49 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     }
   }, []);
 
+  /* Moves the linked Work Order card into the Payments list when a schedule
+   * card is deleted from the schedule channel, so it shows up there with its
+   * current % payment. `stamp` is shared with the archive timestamp written
+   * by deleteScheduleCard so the bounce-back guard in mergeScheduleWithWorkOrder
+   * reliably keeps it archived. */
+  const completeWorkOrderForScheduleCard = useCallback(async (sc: ScCard, stamp: string) => {
+    if (!sc.sourceCardId) return;
+    let src = workOrderCardsRef.current.find(c => String(c.id) === String(sc.sourceCardId));
+    if (!src) {
+      try {
+        const latest = await fetchCards('Work Order');
+        setWorkOrderCards(latest);
+        workOrderCardsRef.current = latest;
+        src = latest.find(c => String(c.id) === String(sc.sourceCardId));
+      } catch {
+        return;
+      }
+    }
+    if (!src) return;
+    const phase = sc.phase ?? getPhaseForListId(sc.listId);
+    const updated: WorkOrderCard = {
+      ...src,
+      list: 'Payments',
+      userWorkStatus: 'Completed',
+      scheduleStage: phase === 'installation' ? 'Installation completed' : 'Delivery completed',
+      completedAt: src.completedAt || stamp,
+      updatedAt: stamp,
+    };
+    workOrderCardsRef.current = workOrderCardsRef.current.map(c => String(c.id) === String(updated.id) ? updated : c);
+    setWorkOrderCards(prev => prev.map(c => String(c.id) === String(updated.id) ? updated : c));
+    try {
+      const uid = localStorage.getItem('userId');
+      const saved = await updateCard(updated, uid ? Number(uid) : undefined);
+      setWorkOrderCards(prev => {
+        const next = prev.map(c => String(c.id) === String(saved.id) ? saved : c);
+        workOrderCardsRef.current = next;
+        return next;
+      });
+    } catch {
+      // Keep schedule responsive even when backend update fails temporarily.
+    }
+  }, []);
+
   const refreshFromWorkOrder = useCallback(async () => {
     try {
       const wo = await fetchCards('Work Order');
@@ -1924,92 +2076,19 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     document.addEventListener('mousedown',h); return ()=>document.removeEventListener('mousedown',h);
   },[]);
 
-  /* daily reset: status/planning -> pending with completion guards */
-  useEffect(()=>{
-    if (!scheduleLoaded) return;
-    if (lastProcessedReferenceDateRef.current === referenceDate) return;
-    lastProcessedReferenceDateRef.current = referenceDate;
-    setStore(prev=>{
-      const next:ScStore=JSON.parse(JSON.stringify(prev));
-      let dirty=false;
-
-      const resetPhase = (phase: SchedulePhase) => {
-        const pendingId = getPendingListForPhase(phase);
-        const phaseListIds = Object.keys(next).filter(listId => listId.endsWith(`-${phase}`));
-        const sourceIds = phaseListIds.filter(listId => listId !== pendingId);
-        const pendingRaw = [...(next[pendingId] ?? [])];
-        const pending = pendingRaw.filter(card => !isCardCompleteForPhase(card, phase));
-        const sourceCards = sourceIds.flatMap(listId => next[listId] ?? []);
-        const carry = sourceCards.filter(card => !isCardCompleteForPhase(card, phase));
-        const completed = [...pendingRaw, ...sourceCards].filter(card => isCardCompleteForPhase(card, phase));
-        const byIdentity = new Set<string>();
-
-        // Keep existing pending cards first (dedup by identity)
-        const dedupedPending: ScCard[] = [];
-        pending.forEach(card => {
-          const identity = getCardIdentity(card);
-          if (byIdentity.has(identity)) return;
-          byIdentity.add(identity);
-          dedupedPending.push(card);
-        });
-
-        carry.forEach(card => {
-          const identity = getCardIdentity(card);
-          if (byIdentity.has(identity)) return;
-          byIdentity.add(identity);
-          dedupedPending.unshift({
-            ...card,
-            listId: pendingId,
-            returnedFromDate: referenceDate,
-            isConfirmed: false,
-            confirmedDate: undefined,
-          });
-          dirty = true;
-        });
-
-        if ((next[pendingId] ?? []).length !== dedupedPending.length) dirty = true;
-        next[pendingId] = dedupedPending;
-
-        if (completed.length > 0) {
-          const archive = [...(next[ARCHIVE_COMPLETED] ?? [])];
-          const archiveByIdentity = new Map<string, number>();
-          archive.forEach((card, idx) => {
-            archiveByIdentity.set(getCardIdentity(card), idx);
-          });
-          completed.forEach(card => {
-            const identity = getCardIdentity(card);
-            const archivedCard: ScCard = {
-              ...card,
-              listId: ARCHIVE_COMPLETED,
-              // Stamp "now" so mergeScheduleWithWorkOrder's bounce-back guard can
-              // reliably tell that this card was archived after the last known
-              // Work Order update, preventing the DB-synced card from
-              // resurrecting it back into an active list.
-              updatedAt: new Date().toISOString(),
-              sectionRemarks: card.sectionRemarks || ((card.workers ?? []).length ? `Last workers: ${(card.workers ?? []).join(', ')}` : card.sectionRemarks),
-            };
-            const existingIdx = archiveByIdentity.get(identity);
-            if (typeof existingIdx === 'number') {
-              archive[existingIdx] = archivedCard;
-            } else {
-              archive.unshift(archivedCard);
-            }
-          });
-          next[ARCHIVE_COMPLETED] = archive;
-          dirty = true;
-        }
-
-        sourceIds.forEach(listId => {
-          if ((next[listId] ?? []).length > 0) dirty = true;
-          next[listId] = [];
-        });
-      };
-
-      resetPhase('delivery');
-      resetPhase('installation');
-      return dirty ? next : prev;
+  /* Manual reset button (placed next to Search by Date) clears Status and
+   * Planning for both phases without touching Pending or any card's values —
+   * the automatic daily carry-forward/archive reset has been removed. */
+  const resetStatusAndPlanning = useCallback(() => {
+    if (!window.confirm('Clear all cards from the Status and Planning tables (Delivery + Installation)? Pending will not be affected.')) return;
+    setStore(prev => {
+      const next: ScStore = { ...prev };
+      [DELIVERY_STATUS, DELIVERY_PLANNING, INSTALLATION_STATUS, INSTALLATION_PLANNING].forEach(listId => {
+        next[listId] = [];
+      });
+      return next;
     });
-  },[scheduleLoaded, referenceDate]);
+  }, []);
 
   // Keep Work Order Schedule cards in sync for Schedule-side changes only.
   useEffect(() => {
@@ -2118,10 +2197,29 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
         next[listId] = (next[listId] ?? []).filter(c => c.id !== card.id);
       });
 
+      const movedPhase = getPhaseForListId(dstId);
+      const movedToPlanning = dstId === getPlanningListForPhase(movedPhase);
+      const movedToStatus = dstId === getStatusListForPhase(movedPhase);
+      const movedDate = movedToPlanning || movedToStatus ? referenceDate : undefined;
+      const updateTankForDestination = (tank: ScTankProgress): ScTankProgress => {
+        if (movedToPlanning) {
+          return movedPhase === 'delivery'
+            ? { ...tank, deliveryStatus: 'Scheduled', scheduledDate: referenceDate }
+            : { ...tank, installationStatus: 'Scheduled', scheduledDate: referenceDate };
+        }
+        if (movedToStatus) return { ...tank, scheduledDate: referenceDate };
+        return tank;
+      };
+
       const movedCards = [{
         ...card,
         listId: dstId,
         workers: workers ?? card.workers,
+        tanks: (card.tanks ?? []).map(updateTankForDestination),
+        // Entering Planning or Status stamps the work-order schedule date.
+        ...(movedDate ? { confirmedDate: movedDate } : {}),
+        ...(movedToPlanning && movedPhase === 'delivery' ? { deliveryStatus: 'Scheduled' } : {}),
+        ...(movedToPlanning && movedPhase === 'installation' ? { installationStatus: 'Scheduled' } : {}),
       }];
 
       movedForSync = movedCards[0] ?? null;
@@ -2130,7 +2228,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
       next[dstId]=dstList; return next;
     });
     if (movedForSync) void syncScheduleCardToWorkOrder(movedForSync);
-  },[syncScheduleCardToWorkOrder]);
+  },[referenceDate, syncScheduleCardToWorkOrder]);
 
   const onDragEnd=useCallback((result:DropResult)=>{
     if (!canEditSchedule) return;
@@ -2149,12 +2247,64 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     () => (searchDate ? buildHistoricalStore(store, searchDate) : store),
     [store, searchDate]
   );
-  const getCards=(lid:string)=>displayStore[lid]??[];
+  const getCards=(lid:string)=>{
+    // Live view: Pending always mirrors the latest Status/Planning cards too,
+    // so it holds the full permanent set (with duplicates) for the phase.
+    if (!searchDate && (lid === DELIVERY_PENDING || lid === INSTALLATION_PENDING)) {
+      return mirrorPendingWithSources(displayStore, getPhaseForListId(lid));
+    }
+    return displayStore[lid]??[];
+  };
   const woQuery = woSearch.trim().toLowerCase();
   const matchesWo = useCallback((card: ScCard)=>{
     if(!woQuery) return true;
     return normalizeWoCode(card.woCode).toLowerCase().includes(woQuery);
   }, [woQuery]);
+
+  /* Updates a single card's fields (used by inline cell edits in the expanded
+   * matrix table) wherever it currently lives, without moving lists. */
+  const updateScheduleCardFields = useCallback((updated: ScCard) => {
+    setStore(prev => {
+      const next: ScStore = { ...prev };
+      let found = false;
+      Object.keys(next).forEach(key => {
+        if (isArchiveListId(key)) return;
+        next[key] = (next[key] ?? []).map(card => {
+          if (card.id !== updated.id) return card;
+          found = true;
+          return { ...updated, listId: card.listId };
+        });
+      });
+      return found ? next : prev;
+    });
+  }, []);
+
+  /* Removes a schedule card entirely from live view (archives it so it still
+   * appears when searching past dates) and moves the linked Work Order card
+   * to the Payments list, showing its current % payment there. */
+  const deleteScheduleCard = useCallback((card: ScCard) => {
+    if (!window.confirm(`Remove WO ${normalizeWoCode(card.woCode)} from the schedule? It will move to the Payments list in Work Order.`)) return;
+    const stamp = new Date().toISOString();
+    setStore(prev => {
+      const next: ScStore = { ...prev };
+      Object.keys(next).forEach(key => {
+        if (isArchiveListId(key)) return;
+        next[key] = (next[key] ?? []).filter(c => c.id !== card.id);
+      });
+      const archived: ScCard = {
+        ...card,
+        listId: ARCHIVE_COMPLETED,
+        completedDate: card.completedDate || referenceDate,
+        updatedAt: stamp,
+      };
+      const archive = [...(next[ARCHIVE_COMPLETED] ?? [])];
+      const idx = archive.findIndex(c => getCardIdentity(c) === getCardIdentity(card));
+      if (idx >= 0) archive[idx] = archived; else archive.unshift(archived);
+      next[ARCHIVE_COMPLETED] = archive;
+      return next;
+    });
+    void completeWorkOrderForScheduleCard(card, stamp);
+  }, [referenceDate, completeWorkOrderForScheduleCard]);
 
   const upsertScheduleCard = useCallback((nextCard: ScCard, listId: string) => {
     setStore(prev => {
@@ -2188,24 +2338,31 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
     const cards = sortScheduleGroup(getCards(listId).filter(matchesWo));
     return (
       <div className="flex flex-col min-h-0 border-r border-b border-gray-200 last:border-r-0 bg-white">
-        <MatrixColumnHeader listId={listId} phase={phase} onExpand={() => setExpandedList({ listId, phase })} />
+        <MatrixColumnHeader listId={listId} phase={phase} count={cards.length} onExpand={() => setExpandedList({ listId, phase })} />
         <Droppable droppableId={listId} direction="vertical" renderClone={renderDragClone}>
           {(prov, snap)=>(
             <div ref={prov.innerRef} {...prov.droppableProps} className={`flex-1 overflow-y-auto scrollbar-hide p-1.5 space-y-0.5 transition-colors ${snap.isDraggingOver?'bg-purple-50/70':''}`}>
               {cards.length === 0 && !snap.isDraggingOver && (
-                <p className="text-[10px] text-gray-300 text-center italic mt-2 select-none">No cards</p>
+                <div className="flex flex-col items-center justify-center gap-1 py-6 text-gray-300 select-none">
+                  <Inbox className="w-5 h-5" />
+                  <p className="text-[10px] font-medium">No work orders</p>
+                </div>
               )}
-              {cards.map((c,i)=>(
-                <CardChip
-                  key={c.id}
-                  card={c}
-                  listId={listId}
-                  index={i}
-                  isPending
-                  isDragDisabled={!canEditSchedule}
-                  onOpen={()=>setSelected({card:c,listId})}
-                />
-              ))}
+              {cards.map((c,i)=>{
+                const isMirrored = (listId === DELIVERY_PENDING || listId === INSTALLATION_PENDING) && c.listId !== listId;
+                return (
+                  <CardChip
+                    key={c.id}
+                    card={c}
+                    listId={listId}
+                    index={i}
+                    isPending
+                    isDragDisabled={!canEditSchedule || isMirrored}
+                    dragKey={isMirrored ? `mirror-${c.id}` : c.id}
+                    onOpen={()=>setExpandedList({listId, phase})}
+                  />
+                );
+              })}
               {prov.placeholder}
             </div>
           )}
@@ -2216,21 +2373,22 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
 
   const renderScheduleMatrix = () => (
     <div className="flex-1 min-h-0 border border-gray-200 bg-white overflow-hidden rounded-2xl shadow-sm">
-      <div className="grid h-full" style={{ gridTemplateColumns: '48px 1fr 1fr 0.55fr', gridTemplateRows: 'auto 1fr 1fr' }}>
-        <div className="border-r border-b border-gray-200 bg-gradient-to-b from-gray-50 to-white" />
-        <div className="border-r border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-purple-600 to-purple-500">PENDING</div>
-        <div className="border-r border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-indigo-600 to-indigo-500">STATUS</div>
-        <div className="border-b border-gray-200 px-2 py-2 text-center text-sm font-bold tracking-wider text-white bg-gradient-to-r from-slate-600 to-slate-500">PLANNING</div>
-
-        <div className="border-r border-b border-gray-200 flex items-center justify-center bg-amber-50 min-h-0">
-          <span className="rotate-[-90deg] text-xs font-bold tracking-widest text-amber-700 whitespace-nowrap">DELIVERY</span>
+      <div className="grid h-full" style={{ gridTemplateColumns: '26px 1fr 1fr 1fr', gridTemplateRows: '1fr 1fr' }}>
+        <div className="border-r border-b border-gray-200 flex items-center justify-center bg-amber-50/80 min-h-0">
+          <span className="inline-flex items-center gap-1 rotate-[-90deg] whitespace-nowrap">
+            <Truck className="w-3 h-3 text-amber-600" />
+            <span className="text-[9px] font-semibold tracking-[0.08em] text-amber-700">DELIVERY</span>
+          </span>
         </div>
         {renderMatrixSection(DELIVERY_PENDING, 'delivery')}
         {renderMatrixSection(DELIVERY_STATUS, 'delivery')}
         {renderMatrixSection(DELIVERY_PLANNING, 'delivery')}
 
-        <div className="border-r border-gray-200 flex items-center justify-center bg-indigo-50 min-h-0">
-          <span className="rotate-[-90deg] text-xs font-bold tracking-widest text-indigo-700 whitespace-nowrap">INSTALLATION</span>
+        <div className="border-r border-gray-200 flex items-center justify-center bg-indigo-50/80 min-h-0">
+          <span className="inline-flex items-center gap-1 rotate-[-90deg] whitespace-nowrap">
+            <Wrench className="w-3 h-3 text-indigo-600" />
+            <span className="text-[9px] font-semibold tracking-[0.08em] text-indigo-700">INSTALLATION</span>
+          </span>
         </div>
         {renderMatrixSection(INSTALLATION_PENDING, 'installation')}
         {renderMatrixSection(INSTALLATION_STATUS, 'installation')}
@@ -2807,6 +2965,14 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           <p className="text-xs text-gray-400 mt-0.5">{format(parseISO(referenceDate),'EEEE, MMMM d, yyyy')}</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={resetStatusAndPlanning}
+            disabled={!canEditSchedule}
+            title="Clear all cards from Status and Planning (Delivery + Installation) without changing Pending"
+            className={`p-2 rounded-lg border ${!canEditSchedule ? 'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-500 border-gray-200 hover:text-red-600 hover:border-red-300'}`}
+          >
+            <RotateCcw className="w-3.5 h-3.5"/>
+          </button>
           <div className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-lg bg-white ${searchDate ? 'border-purple-300 ring-1 ring-purple-200' : 'border-gray-200'}`}>
             <Search className="w-3.5 h-3.5 text-gray-400"/>
             <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">Search by Date</span>
@@ -2911,7 +3077,10 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
           listId={expandedList.listId}
           phase={expandedList.phase}
           cards={sortScheduleGroup(getCards(expandedList.listId).filter(matchesWo))}
-          onOpenCard={(card) => setSelected({ card, listId: expandedList.listId })}
+          referenceDate={referenceDate}
+          canEdit={canEditSchedule && !searchDate}
+          onUpdateCard={updateScheduleCardFields}
+          onDeleteCard={deleteScheduleCard}
           onClose={() => setExpandedList(null)}
         />
       )}
