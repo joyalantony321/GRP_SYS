@@ -103,7 +103,7 @@ export default function CardModal({ card, onClose, onUpdate, onDelete, userRole,
   const formatTankType = (tank: TankDetail) => tank.tankType || '-';
 
   const isDeliveryInstallation = userRole !== 'admin' && userDepartment === 'Delivery & Installation';
-  const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts');
+  const isPaymentViewer = channel === 'Work Order' && (userRole === 'admin' || userDepartment === 'Accounts & Technical');
   const modalPaymentPercent = Math.max(0, Math.min(100, Number(editedCard.paymentPercent ?? card.paymentPercent ?? 0)));
   const modalPaymentHue = Math.round((modalPaymentPercent / 100) * 120);
   const modalPaymentColor = `hsl(${modalPaymentHue} 78% 40%)`;

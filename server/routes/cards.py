@@ -9,7 +9,7 @@ from datetime import date as date_type, datetime, timezone
 from typing import Any, Optional, List, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,27 @@ from models import (
 from ws_manager import manager
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+# Best-effort channel gate: this app only has PIN-based login (no session
+# tokens), so this cannot fully stop a determined client from spoofing
+# headers — it exists to enforce the intended department routing for normal
+# frontend usage. Admin (or requests without these headers, e.g. internal
+# tooling) are always allowed through.
+CHANNEL_ALLOWED_DEPARTMENTS = {
+    "Quotation": set(),                          # Quotation channel now Admin-only
+    "Work Order": {"Accounts & Technical", "Delivery & Installation"},
+    "Schedule": {"Accounts & Technical", "Delivery & Installation"},
+}
+
+
+def _enforce_channel_access(channel_name: str, x_user_role: Optional[str], x_user_department: Optional[str]) -> None:
+    if not x_user_role or x_user_role == "admin":
+        return
+    allowed = CHANNEL_ALLOWED_DEPARTMENTS.get(channel_name)
+    if allowed is None:
+        return
+    if (x_user_department or "") not in allowed:
+        raise HTTPException(status_code=403, detail=f"Department '{x_user_department}' cannot access '{channel_name}'")
 
 
 WORK_ORDER_LIST_ALIASES = {
@@ -169,6 +190,9 @@ class CardIn(BaseModel):
     schedule_stage: Optional[str] = None
     completed_at: Optional[str] = None
     assignment_history: Optional[list] = None
+    cheque_status: Optional[str] = None
+    accounts_remarks: Optional[str] = None
+    payment_status_text: Optional[str] = None
     purchase_order_doc_name: Optional[str] = None
     purchase_order_doc_url: Optional[str] = None
     quotation_doc_name: Optional[str] = None
@@ -398,6 +422,9 @@ def _card_to_dict(card: Card) -> dict:
         "scheduleType":         schedule_type,
         "scheduleStage":        card.schedule_stage,
         "assignmentHistory":    card.assignment_history or [],
+        "chequeStatus":         card.cheque_status,
+        "accountsRemarks":      card.accounts_remarks,
+        "paymentStatusText":    card.payment_status_text,
         "completedAt":          card.completed_at.isoformat() if card.completed_at else None,
         "purchaseOrderDocName": card.purchase_order_doc_name,
         "purchaseOrderDocUrl":  card.purchase_order_doc_url,
@@ -454,8 +481,14 @@ def _write_audit(db: Session, channel_name: str, action: str, performed_by_id: O
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/{channel_name}")
-def list_cards(channel_name: str, db: Session = Depends(get_db)):
+def list_cards(
+    channel_name: str,
+    db: Session = Depends(get_db),
+    x_user_role: Optional[str] = Header(default=None),
+    x_user_department: Optional[str] = Header(default=None),
+):
     """Return all cards for a given channel by name: 'Quotation' or 'Work Order'."""
+    _enforce_channel_access(channel_name, x_user_role, x_user_department)
     ch = db.query(Channel).filter(Channel.channel_name == channel_name).first()
     if not ch:
         return []
@@ -499,6 +532,9 @@ async def create_card(card_in: CardIn, performed_by: Optional[int] = None, db: S
         schedule_type=card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else None),
         schedule_stage=card_in.schedule_stage,
         assignment_history=card_in.assignment_history or [],
+        cheque_status=card_in.cheque_status,
+        accounts_remarks=card_in.accounts_remarks,
+        payment_status_text=card_in.payment_status_text,
         purchase_order_doc_name=card_in.purchase_order_doc_name,
         purchase_order_doc_url=card_in.purchase_order_doc_url,
         quotation_doc_name=card_in.quotation_doc_name,
@@ -593,6 +629,9 @@ async def update_card(card_id: str, card_in: CardIn, performed_by: Optional[int]
     card.schedule_type           = card_in.schedule_type or ("Installation" if lst.list_name == "Installation" else "Delivery" if lst.list_name == "Delivery" else card.schedule_type)
     card.schedule_stage          = card_in.schedule_stage
     card.assignment_history      = card_in.assignment_history if card_in.assignment_history is not None else (card.assignment_history or [])
+    card.cheque_status           = card_in.cheque_status
+    card.accounts_remarks        = card_in.accounts_remarks
+    card.payment_status_text     = card_in.payment_status_text
     card.purchase_order_doc_name = card_in.purchase_order_doc_name
     card.purchase_order_doc_url  = card_in.purchase_order_doc_url
     card.quotation_doc_name      = card_in.quotation_doc_name

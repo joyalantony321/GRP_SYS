@@ -1010,7 +1010,8 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
           <div className="flex flex-col items-end gap-2">
             {/* Top right row: Channel Switcher + View Mode Buttons */}
             <div className="flex items-center gap-3">
-              {/* Channel Switcher */}
+              {/* Channel Switcher — Admin only */}
+              {userRole === 'admin' && (
               <div className="relative" ref={channelDropdownRef}>
                 <button
                   onClick={() => setShowChannelDropdown(prev => !prev)}
@@ -1036,7 +1037,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                         />
                       </div>
                     </div>
-                    {(['Quotation', 'Work Order', 'Schedule'] as ChannelType[]).map(ch => {
+                    {(['Quotation', 'Work Order', 'Schedule', 'Accounts & Technical'] as ChannelType[]).map(ch => {
                       const accessible = accessibleChannels.includes(ch);
                       return (
                         <button
@@ -1048,13 +1049,15 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                           } ${!accessible ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                         >
                           <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                            ch === 'Quotation' ? 'bg-blue-100' : ch === 'Work Order' ? 'bg-orange-100' : 'bg-purple-100'
+                            ch === 'Quotation' ? 'bg-blue-100' : ch === 'Work Order' ? 'bg-orange-100' : ch === 'Schedule' ? 'bg-purple-100' : 'bg-teal-100'
                           }`}>
                             {ch === 'Quotation'
                               ? <FileText className="w-4 h-4 text-blue-600" />
                               : ch === 'Work Order'
                               ? <ClipboardList className="w-4 h-4 text-orange-500" />
-                              : <CalendarRange className="w-4 h-4 text-purple-600" />}
+                              : ch === 'Schedule'
+                              ? <CalendarRange className="w-4 h-4 text-purple-600" />
+                              : <ClipboardList className="w-4 h-4 text-teal-600" />}
                           </span>
                           <span className={`flex-1 text-left font-medium ${activeChannel === ch ? 'text-gray-900' : 'text-gray-700'}`}>
                             {ch}
@@ -1066,6 +1069,7 @@ export default function KanbanBoard({ cards, setCards, userRole, userName, userD
                   </div>
                 )}
               </div>
+              )}
 
               <button
                 onClick={handleGlobalAddCard}

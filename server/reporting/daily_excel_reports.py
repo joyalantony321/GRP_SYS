@@ -42,6 +42,9 @@ HEADER_ALIASES: Dict[str, List[str]] = {
     "Installation Date": ["INSTALLATION DATE", "INSTA.", "INS.DATE", "INS DATE"],
     "Payment Status": ["PAYMENT STATUS", "PAY.STATUS", "PAY STATUS"],
     "PDC Cheque": ["PDC CHEQUE", "P.D.C. CHEUQE", "P.D.C. CHEQUE", "PDC CHECK", "CHEUQE STATUS", "CHEQUE STATUS"],
+    "Delivery Remarks": ["DEL.REMARKS", "DEL REMARKS", "DELIVERY REMARKS"],
+    "Installation Remarks": ["INSTA.REMARKS", "INSTA REMARKS", "INSTALLATION REMARKS", "INS.REMARKS"],
+    "Cheque Status": ["CHEUQE STATUS", "CHEQUE STATUS", "CHEQUE STATUS."],
 }
 
 ACTIVE_SCHEDULE_LISTS = {
@@ -86,6 +89,11 @@ class ReportRecord:
     completed_date: Optional[date]
     updated_date: Optional[date]
     tanks: List[Dict[str, str]] = None  # type: ignore[assignment]
+    cheque_status: str = ""
+    accounts_remarks: str = ""
+    delivery_remarks: str = ""
+    installation_remarks: str = ""
+    payment_status_text: str = ""
 
     def __post_init__(self) -> None:
         if self.tanks is None:
@@ -444,6 +452,9 @@ def _to_record(card: Card) -> ReportRecord:
         requires_installation=(bool(wo.installation) if wo else None),
         completed_date=_as_date(card.completed_at),
         updated_date=_as_date(card.updated_at),
+        cheque_status=(card.cheque_status or "").strip(),
+        accounts_remarks=(card.accounts_remarks or "").strip(),
+        payment_status_text=(card.payment_status_text or "").strip(),
     )
 
 
@@ -485,6 +496,9 @@ def _column_value(rec: ReportRecord, col: str) -> str:
         "PAY.STATUS": rec.payment_status,
         "PDC Cheque": rec.pdc_cheque,
         "P.D.C. CHEUQE": rec.pdc_cheque,
+        "Cheque Status": rec.cheque_status or rec.pdc_cheque,
+        "Delivery Remarks": rec.delivery_remarks,
+        "Installation Remarks": rec.installation_remarks,
     }
     return mapping.get(col, "")
 
@@ -1377,6 +1391,21 @@ REPORT_SPECS: List[ReportSpec] = [
     ),
 ]
 
+# Accounts & Technical channel's own Payment export — reuses the same
+# "Payment Status.xlsx" template but adds the split Delivery/Installation
+# remarks and the editable Cheque Status column.
+ACCOUNTS_PAYMENT_SPEC = ReportSpec(
+    key="accounts_payment",
+    template_name="Payment Status.xlsx",
+    output_stem="Payment_AccountsTechnical",
+    columns=[
+        "Work Order No.", "Customer", "Delivery Date", "Delivery Remarks",
+        "Installation Date", "Installation Remarks", "Payment Status",
+        "Cheque Status", "Sales Person", "Remarks",
+    ],
+    include=_payment_report,
+)
+
 
 def _query_work_order_cards(db: Session) -> List[Card]:
     channel = db.query(Channel).filter(Channel.channel_name == "Work Order").first()
@@ -1439,7 +1468,7 @@ def get_pending_report_details(db: Session, run_date: Optional[date] = None) -> 
     }
 
 
-def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict[str, str]:
+def generate_daily_reports(db: Session, run_date: Optional[date] = None, include_payment: bool = True) -> Dict[str, str]:
     today = run_date or _today_local()
     template_dir = Path(os.getenv("REPORT_TEMPLATES_DIR", "/app/report_templates"))
     output_dir = Path(os.getenv("REPORT_OUTPUT_DIR", "/app/reports/daily"))
@@ -1452,6 +1481,8 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
     missing_templates: List[str] = []
 
     for spec in REPORT_SPECS:
+        if spec.key == "payment_status" and not include_payment:
+            continue
         template_path = template_dir / spec.template_name
         if not template_path.exists():
             missing_templates.append(spec.template_name)
@@ -1475,6 +1506,49 @@ def generate_daily_reports(db: Session, run_date: Optional[date] = None) -> Dict
     if missing_templates:
         outputs["missing_templates"] = ", ".join(missing_templates)
     return outputs
+
+
+def generate_accounts_payment_report(db: Session, run_date: Optional[date] = None) -> Dict[str, str]:
+    """Accounts & Technical → Payment export: same rows as the Payment list,
+    minus any cards the user removed from that list via Delete Card."""
+    today = run_date or _today_local()
+    template_dir = Path(os.getenv("REPORT_TEMPLATES_DIR", "/app/report_templates"))
+    output_dir = Path(os.getenv("REPORT_OUTPUT_DIR", "/app/reports/daily"))
+
+    records = _build_report_records(db)
+    schedule_cards = _load_schedule_cards(today)
+    buckets = _build_records_by_schedule(records, schedule_cards, today)
+
+    raw_store = _load_schedule_store_raw()
+    hidden_ids = {str(x) for x in (raw_store.get("accounts-payments-hidden") or []) if x}
+
+    delivery_by_wo = {r.work_order_no: r for r in buckets["delivery_pending"] if r.work_order_no}
+    installation_by_wo = {r.work_order_no: r for r in buckets["installation_pending"] if r.work_order_no}
+
+    rows: List[ReportRecord] = []
+    for rec in buckets["payment_status"]:
+        if rec.source_card_id in hidden_ids:
+            continue
+        d = delivery_by_wo.get(rec.work_order_no)
+        i = installation_by_wo.get(rec.work_order_no)
+        rows.append(ReportRecord(**{
+            **rec.__dict__,
+            "delivery_date": d.delivery_date if d else rec.delivery_date,
+            "delivery_remarks": d.remarks if d else "",
+            "installation_date": i.installation_date if i else rec.installation_date,
+            "installation_remarks": i.remarks if i else "",
+            "remarks": rec.accounts_remarks,
+            "payment_status": rec.payment_status_text or rec.payment_status,
+        }))
+
+    template_path = template_dir / ACCOUNTS_PAYMENT_SPEC.template_name
+    if not template_path.exists():
+        return {"missing_templates": ACCOUNTS_PAYMENT_SPEC.template_name}
+
+    filename = f"{ACCOUNTS_PAYMENT_SPEC.output_stem}_{today.strftime('%Y-%m-%d')}.xlsx"
+    out_path = output_dir / filename
+    saved_path = _write_rows_to_template(template_path, out_path, rows, ACCOUNTS_PAYMENT_SPEC)
+    return {"accounts_payment": str(saved_path)}
 
 
 async def _report_scheduler_loop() -> None:

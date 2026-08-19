@@ -125,6 +125,9 @@ class Card(Base):
     schedule_stage          = Column(String(40), nullable=True)
     completed_at            = Column(DateTime(timezone=True), nullable=True)
     assignment_history      = Column(JSON, nullable=True, default=list)
+    cheque_status           = Column(String(40), nullable=True)
+    accounts_remarks        = Column(Text, nullable=True)
+    payment_status_text     = Column(String(60), nullable=True)
 
     # Document references (stored as file paths on server)
     purchase_order_doc_name = Column(String(255), nullable=True)

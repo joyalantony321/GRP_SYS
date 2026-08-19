@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import KanbanBoard from '@/components/KanbanBoard';
 import ScheduleBoard from '@/components/ScheduleBoard';
+import AccountsTechnicalBoard from '@/components/AccountsTechnicalBoard';
 import AdminPanel from '@/components/AdminPanel';
 import { Card, ChannelType, Department, CHANNEL_DEPARTMENTS } from '@/types';
 import {
@@ -33,11 +34,12 @@ export default function Kanban() {
   const [userName, setUserName] = useState<string>('');
   const [userDepartment, setUserDepartment] = useState<Department | ''>('');
   const [userId, setUserId] = useState<number | undefined>(undefined);
-  const [activeChannel, setActiveChannel] = useState<ChannelType>('Quotation');
+  const [activeChannel, setActiveChannel] = useState<ChannelType>('Accounts & Technical');
   const [cardsByChannel, setCardsByChannel] = useState<Record<ChannelType, Card[]>>({
     'Quotation': [],
     'Work Order': [],
     'Schedule': [],
+    'Accounts & Technical': [],
   });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -71,12 +73,14 @@ export default function Kanban() {
     loadChannel('Quotation');
     loadChannel('Work Order');
 
-    // Determine default channel based on department
+    // Determine default (landing) channel based on department.
+    // Admin keeps manual channel switching; normal users are routed straight
+    // to their department's operational channel and never see the switcher.
     if (role === 'user' && dept) {
-      const canQuotation = CHANNEL_DEPARTMENTS['Quotation'].includes(dept as Department);
-      const canWorkOrder = CHANNEL_DEPARTMENTS['Work Order'].includes(dept as Department);
-      if (!canQuotation && canWorkOrder) {
-        setActiveChannel('Work Order');
+      if (dept === 'Accounts & Technical') {
+        setActiveChannel('Accounts & Technical');
+      } else if (dept === 'Delivery & Installation') {
+        setActiveChannel('Schedule');
       }
     }
   }, [router, loadChannel]);
@@ -207,9 +211,9 @@ export default function Kanban() {
 
   // Determine which channels are accessible to the current user
   const accessibleChannels: ChannelType[] = userRole === 'admin'
-    ? ['Quotation', 'Work Order', 'Schedule']
-    : (['Quotation', 'Work Order', 'Schedule'] as ChannelType[]).filter(ch =>
-        ch === 'Schedule' ? true : (userDepartment ? CHANNEL_DEPARTMENTS[ch].includes(userDepartment as Department) : false)
+    ? ['Quotation', 'Work Order', 'Schedule', 'Accounts & Technical']
+    : (['Quotation', 'Work Order', 'Schedule', 'Accounts & Technical'] as ChannelType[]).filter(ch =>
+        ch === 'Schedule' || ch === 'Accounts & Technical' ? true : (userDepartment ? CHANNEL_DEPARTMENTS[ch].includes(userDepartment as Department) : false)
       );
 
   if (!userRole) {
@@ -225,6 +229,17 @@ export default function Kanban() {
           userRole={userRole}
           onChannelSwitch={handleChannelSwitch}
           accessibleChannels={accessibleChannels}
+          onAdminSettings={userRole === 'admin' ? () => setShowAdminPanel(true) : undefined}
+        />
+      ) : activeChannel === 'Accounts & Technical' ? (
+        <AccountsTechnicalBoard
+          userName={userName}
+          userDepartment={userDepartment}
+          userRole={userRole}
+          onChannelSwitch={handleChannelSwitch}
+          accessibleChannels={accessibleChannels}
+          onCreateInChannel={addCardToChannel}
+          onAdminSettings={userRole === 'admin' ? () => setShowAdminPanel(true) : undefined}
         />
       ) : (
         <KanbanBoard

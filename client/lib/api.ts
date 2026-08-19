@@ -53,11 +53,18 @@ function isNetworkError(error: unknown): boolean {
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const bases = buildBaseCandidates();
   let lastError: unknown;
+  const authHeaders: Record<string, string> = {};
+  if (typeof window !== 'undefined') {
+    const role = localStorage.getItem('userRole');
+    const dept = localStorage.getItem('userDepartment');
+    if (role) authHeaders['X-User-Role'] = role;
+    if (dept) authHeaders['X-User-Department'] = dept;
+  }
 
   for (const base of bases) {
     try {
       const res = await fetch(`${base}${path}`, {
-        headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+        headers: { 'Content-Type': 'application/json', ...authHeaders, ...(init?.headers ?? {}) },
         ...init,
       });
       if (!res.ok) {
@@ -140,9 +147,17 @@ export const fetchPendingReportDetails = (forDate?: string): Promise<PendingRepo
   return req<PendingReportDetailsResponse>(`/reports/daily/pending-details${q}`);
 };
 
-export const generateDailyReports = (forDate?: string): Promise<DailyReportGenerateResponse> => {
-  const q = forDate ? `?for_date=${encodeURIComponent(forDate)}` : '';
+export const generateDailyReports = (forDate?: string, includePayment: boolean = true): Promise<DailyReportGenerateResponse> => {
+  const params = new URLSearchParams();
+  if (forDate) params.set('for_date', forDate);
+  if (!includePayment) params.set('include_payment', 'false');
+  const q = params.toString() ? `?${params.toString()}` : '';
   return req<DailyReportGenerateResponse>(`/reports/daily/generate${q}`, { method: 'POST' });
+};
+
+export const generateAccountsPaymentReport = (forDate?: string): Promise<DailyReportGenerateResponse> => {
+  const q = forDate ? `?for_date=${encodeURIComponent(forDate)}` : '';
+  return req<DailyReportGenerateResponse>(`/reports/accounts/payment/generate${q}`, { method: 'POST' });
 };
 
 // ── User / Auth ───────────────────────────────────────────────────────────
@@ -215,6 +230,9 @@ export function mapCard(c: Record<string, unknown>): Card {
     assignedTo:            (c.assignedToUsername as string) ?? (c.assignedTo as string) ?? undefined,
     userWorkStatus:        (c.userWorkStatus as UserWorkStatus) ?? undefined,
     paymentPercent:        typeof c.paymentPercent === 'number' ? (c.paymentPercent as number) : 0,
+    chequeStatus:          (c.chequeStatus as string) ?? undefined,
+    accountsRemarks:       (c.accountsRemarks as string) ?? undefined,
+    paymentStatusText:     (c.paymentStatusText as string) ?? undefined,
     tankDetails:           ((c.tankDetails as Record<string, unknown>[]) ?? []).map((tank, index) => ({
       id: (tank.id as string) ?? `tank-${index + 1}`,
       label: (tank.label as string) ?? `T${index + 1}`,
@@ -378,6 +396,9 @@ function toCardIn(card: Card, performedBy?: number) {
     schedule_type:          encodeScheduleTypeForApi(card.scheduleType),
     schedule_stage:         card.scheduleStage ?? null,
     assignment_history:     card.assignmentHistory ?? [],
+    cheque_status:          card.chequeStatus ?? null,
+    accounts_remarks:       card.accountsRemarks ?? null,
+    payment_status_text:    card.paymentStatusText ?? null,
     completed_at:           card.completedAt ?? null,
     purchase_order_doc_name: card.purchaseOrderDocName ?? null,
     purchase_order_doc_url:  card.purchaseOrderDocUrl ?? null,

@@ -48,7 +48,8 @@ INSERT INTO departments (dep_name) VALUES
     ('Quotation'),
     ('Technical'),
     ('Accounts'),
-    ('Delivery & Installation');
+    ('Delivery & Installation'),
+    ('Accounts & Technical');
 
 -- =============================================================================
 -- TABLE 2 — USERS
@@ -142,6 +143,9 @@ CREATE TABLE cards (
     schedule_type           VARCHAR(40),
     schedule_stage          VARCHAR(40),
     assignment_history      JSONB,
+    cheque_status           VARCHAR(40),
+    accounts_remarks        TEXT,
+    payment_status_text     VARCHAR(60),
 
     -- Document references (file stored on disk, URL kept here)
     purchase_order_doc_name VARCHAR(255),

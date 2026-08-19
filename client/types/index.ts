@@ -37,41 +37,33 @@ export function isWorkOrderList(list: string): list is WorkOrderListType {
 
 export type UserWorkStatus = 'Assigned' | 'Working' | 'Completed';
 
-export type ChannelType = 'Quotation' | 'Work Order' | 'Schedule';
+export type ChannelType = 'Quotation' | 'Work Order' | 'Schedule' | 'Accounts & Technical';
 
-export type Department = 'Quotation' | 'Technical' | 'Accounts' | 'Delivery & Installation';
+export type Department = 'Accounts & Technical' | 'Delivery & Installation';
 
-export const DEPARTMENTS: Department[] = ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'];
+export const DEPARTMENTS: Department[] = ['Accounts & Technical', 'Delivery & Installation'];
 
 export const CHANNEL_LISTS: Record<ChannelType, ListType[]> = {
   'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
   'Work Order': [...WORK_ORDER_LISTS],
   'Schedule': [],
+  'Accounts & Technical': [],
 };
 
 export const CHANNEL_DEPARTMENTS: Record<ChannelType, Department[]> = {
-  'Quotation': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
-  'Work Order': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
-  'Schedule': ['Quotation', 'Technical', 'Accounts', 'Delivery & Installation'],
+  'Quotation': [],
+  'Work Order': ['Accounts & Technical', 'Delivery & Installation'],
+  'Schedule': ['Accounts & Technical', 'Delivery & Installation'],
+  'Accounts & Technical': ['Accounts & Technical', 'Delivery & Installation'],
 };
 
 // Per-department list permissions per channel.
 // Admin always sees all lists. undefined = no access to that channel.
 export const DEPARTMENT_LISTS: Record<Department, Partial<Record<ChannelType, ListType[]>>> = {
-  'Quotation': {
-    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
-  },
-  'Technical': {
-    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
-    'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
-  },
-  'Accounts': {
-    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
+  'Accounts & Technical': {
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
   },
   'Delivery & Installation': {
-    'Quotation': ['Quotation', 'Submittal', 'Review', 'LPO'],
     'Work Order': ['Work Order', 'Approval', 'Payments', 'Schedule'],
   },
 };
@@ -133,6 +125,9 @@ export interface Card {
   assignedTo?: string;
   userWorkStatus?: UserWorkStatus;
   paymentPercent?: number;
+  chequeStatus?: string;
+  accountsRemarks?: string;
+  paymentStatusText?: string;
   tankDetails?: TankDetail[];
   listHistory?: { list: ListType; enteredAt: string }[];
   assignmentHistory?: { assignedTo: string; assignedAt: string; assignedBy?: string; action?: 'Sent' | 'Approved' | 'Terminated' | 'Revised' | 'Redo' }[];

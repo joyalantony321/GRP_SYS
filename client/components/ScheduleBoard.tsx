@@ -8,7 +8,7 @@ import {
   X, Plus, ChevronLeft, ChevronRight, Truck, Wrench, Users,
   CheckCircle, MessageSquare, AlertTriangle, Zap, CalendarRange,
   ChevronDown, Check, FileText, ClipboardList, Search,
-  TrendingUp, Clock, ArrowUp, Maximize2, RotateCcw, MapPin, Activity, Inbox,
+  TrendingUp, Clock, ArrowUp, Maximize2, RotateCcw, MapPin, Activity, Inbox, Settings,
 } from 'lucide-react';
 import { Card as WorkOrderCard, ChannelType, ScheduleStage, TankDetail } from '@/types';
 import { fetchCards, updateCard, fetchPendingReportDetails, generateDailyReports, PendingReportDetailsResponse, PendingReportRow } from '@/lib/api';
@@ -35,7 +35,7 @@ interface ScDelayPeriod {
   endDate?: string;
 }
 
-type SchedulePhase = 'delivery' | 'installation';
+export type SchedulePhase = 'delivery' | 'installation';
 
 interface ScTankProgress {
   tankDetailId: string;
@@ -79,9 +79,9 @@ export interface ScCard {
   delayPeriods?: ScDelayPeriod[];
   returnedFromDate?: string;
 }
-type ScStore = Record<string, ScCard[]>;
+export type ScStore = Record<string, ScCard[]>;
 
-const EMPTY_STORE: ScStore = {
+export const EMPTY_STORE: ScStore = {
   'pending-delivery': [],
   'status-delivery': [],
   'planning-delivery': [],
@@ -91,20 +91,20 @@ const EMPTY_STORE: ScStore = {
   'archive-completed': [],
 };
 
-const DELIVERY_PENDING = 'pending-delivery';
-const DELIVERY_STATUS = 'status-delivery';
-const DELIVERY_PLANNING = 'planning-delivery';
-const INSTALLATION_PENDING = 'pending-installation';
-const INSTALLATION_STATUS = 'status-installation';
-const INSTALLATION_PLANNING = 'planning-installation';
-const ARCHIVE_COMPLETED = 'archive-completed';
+export const DELIVERY_PENDING = 'pending-delivery';
+export const DELIVERY_STATUS = 'status-delivery';
+export const DELIVERY_PLANNING = 'planning-delivery';
+export const INSTALLATION_PENDING = 'pending-installation';
+export const INSTALLATION_STATUS = 'status-installation';
+export const INSTALLATION_PLANNING = 'planning-installation';
+export const ARCHIVE_COMPLETED = 'archive-completed';
 const isDeliveryListId = (listId: string) => listId.endsWith('-delivery');
 const isInstallationListId = (listId: string) => listId.endsWith('-installation');
 const isArchiveListId = (listId: string) => listId === ARCHIVE_COMPLETED;
 const getPhaseForListId = (listId: string): SchedulePhase => (isInstallationListId(listId) ? 'installation' : 'delivery');
-const getPendingListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PENDING : INSTALLATION_PENDING;
-const getStatusListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_STATUS : INSTALLATION_STATUS;
-const getPlanningListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PLANNING : INSTALLATION_PLANNING;
+export const getPendingListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PENDING : INSTALLATION_PENDING;
+export const getStatusListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_STATUS : INSTALLATION_STATUS;
+export const getPlanningListForPhase = (phase: SchedulePhase) => phase === 'delivery' ? DELIVERY_PLANNING : INSTALLATION_PLANNING;
 
 const toTankProgress = (card: WorkOrderCard, existingById: Record<string, ScTankProgress> = {}): ScTankProgress[] => {
   const woTanks = card.tankDetails ?? [];
@@ -193,9 +193,9 @@ const derivePhoneNumber = (card: WorkOrderCard): string | undefined => {
   return details.deliveryContactNumber?.trim() || details.companyPhone?.trim() || undefined;
 };
 
-const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
+export const dateKey = (date = new Date()) => format(date, 'yyyy-MM-dd');
 
-const normalizeWoCode = (value?: string): string => (value ?? '').trim().replace(/^WO-/i, '');
+export const normalizeWoCode = (value?: string): string => (value ?? '').trim().replace(/^WO-/i, '');
 
 const deriveWoCode = (card: WorkOrderCard): string =>
   normalizeWoCode((card.workOrderNumber || card.quoteNumber || '').split('/').pop() || String(card.id));
@@ -237,7 +237,7 @@ const flattenCards = (store: ScStore): ScCard[] => Object.values(store).flat();
  * a live duplicate of it (kept up to date on every render) so it never goes
  * missing; Status/Planning are cleared out at the next daily reset while
  * Pending's own copy (upserted at that point) persists. */
-const mirrorPendingWithSources = (store: ScStore, phase: SchedulePhase): ScCard[] => {
+export const mirrorPendingWithSources = (store: ScStore, phase: SchedulePhase): ScCard[] => {
   const pendingId = getPendingListForPhase(phase);
   const statusId = getStatusListForPhase(phase);
   const planningId = getPlanningListForPhase(phase);
@@ -325,14 +325,14 @@ const isCardCompleteForPhase = (card: ScCard, phase: SchedulePhase): boolean => 
   return tanks.every(t => t.installationStatus === 'Fully Installed');
 };
 
-const getTanksLeftForPhase = (card: ScCard, phase: SchedulePhase): number => {
+export const getTanksLeftForPhase = (card: ScCard, phase: SchedulePhase): number => {
   const tanks = card.tanks ?? [];
   if (tanks.length === 0) return isCardCompleteForPhase(card, phase) ? 0 : 1;
   if (phase === 'delivery') return tanks.filter(t => t.deliveryStatus !== 'Fully delivered').length;
   return tanks.filter(t => t.installationStatus !== 'Fully Installed').length;
 };
 
-const getPhaseStatusLabel = (card: ScCard, phase: SchedulePhase): string => {
+export const getPhaseStatusLabel = (card: ScCard, phase: SchedulePhase): string => {
   const tanks = card.tanks ?? [];
   if (tanks.length === 0) {
     if (phase === 'delivery') return card.deliveryStatus || 'Not scheduled';
@@ -350,7 +350,7 @@ const getPhaseStatusLabel = (card: ScCard, phase: SchedulePhase): string => {
     : 'Not scheduled';
 };
 
-const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
+export const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
   const phase = getPhaseForListId(listId);
   const isPending = listId.startsWith('pending-');
   const isPlanning = listId.startsWith('planning-');
@@ -366,7 +366,7 @@ const getScheduleStage = (card: ScCard, listId: string): ScheduleStage => {
   return 'Installation scheduled';
 };
 
-const sortScheduleGroup = (cards: ScCard[]) => {
+export const sortScheduleGroup = (cards: ScCard[]) => {
   const entryTime = (card: ScCard) => Date.parse(card.returnedFromDate || card.confirmedDate || card.createdAt || '') || 0;
   return [...cards].sort((left, right) => {
     if (left.isEmergency !== right.isEmergency) return left.isEmergency ? -1 : 1;
@@ -422,7 +422,7 @@ const toScheduleCards = (card: WorkOrderCard): ScCard[] => {
   }));
 };
 
-const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[], referenceDay: string = dateKey()): ScStore => {
+export const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[], referenceDay: string = dateKey()): ScStore => {
   const next: ScStore = JSON.parse(JSON.stringify(store));
   if (!next[ARCHIVE_COMPLETED]) next[ARCHIVE_COMPLETED] = [];
 
@@ -528,7 +528,7 @@ const mergeScheduleWithWorkOrder = (store: ScStore, woCards: WorkOrderCard[], re
   return next;
 };
 
-const normalizeStore = (raw: unknown): ScStore => {
+export const normalizeStore = (raw: unknown): ScStore => {
   const normalized: ScStore = {
     'pending-delivery': [],
     'status-delivery': [],
@@ -563,9 +563,9 @@ const normalizeStore = (raw: unknown): ScStore => {
 /* ─── Colour system ──────────────────────────────────────────────────────── */
 
 /** 4-tier payment colour: red 0%, yellow 1-49%, blue 50-99%, green 100% */
-const pColor = (p: number) => p === 0 ? '#ef4444' : p < 50 ? '#eab308' : p < 100 ? '#3b82f6' : '#22c55e';
-const pBorder = (p: number) => p === 0 ? '#dc2626' : p < 50 ? '#ca8a04' : p < 100 ? '#2563eb' : '#16a34a';
-const pBg    = (p: number) => p === 0 ? '#fef2f2' : p < 50 ? '#fefce8' : p < 100 ? '#eff6ff' : '#f0fdf4';
+export const pColor = (p: number) => p === 0 ? '#ef4444' : p < 50 ? '#eab308' : p < 100 ? '#3b82f6' : '#22c55e';
+export const pBorder = (p: number) => p === 0 ? '#dc2626' : p < 50 ? '#ca8a04' : p < 100 ? '#2563eb' : '#16a34a';
+export const pBg    = (p: number) => p === 0 ? '#fef2f2' : p < 50 ? '#fefce8' : p < 100 ? '#eff6ff' : '#f0fdf4';
 
 /** Distinct colour per tank status value: gray = not started/not delivered,
  * amber = partially delivered/installed, green = completed. */
@@ -1798,9 +1798,10 @@ type Props = {
   userRole?: string;
   onChannelSwitch?: (ch: ChannelType) => void;
   accessibleChannels?: ChannelType[];
+  onAdminSettings?: () => void;
 };
 
-export default function ScheduleBoard({ userName, userDepartment, userRole, onChannelSwitch, accessibleChannels=[] }: Props) {
+export default function ScheduleBoard({ userName, userDepartment, userRole, onChannelSwitch, accessibleChannels=[], onAdminSettings }: Props) {
   const [store, setStore]           = useState<ScStore>(EMPTY_STORE);
   const [referenceDate] = useState<string>(dateKey());
   const [searchDate, setSearchDate] = useState<string>('');
@@ -2258,7 +2259,13 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const woQuery = woSearch.trim().toLowerCase();
   const matchesWo = useCallback((card: ScCard)=>{
     if(!woQuery) return true;
-    return normalizeWoCode(card.woCode).toLowerCase().includes(woQuery);
+    const haystack = [
+      normalizeWoCode(card.woCode), card.customer, card.brand, card.location, card.tankSize,
+      card.productType, card.contactPerson, card.phone, card.salesPerson, card.sectionRemarks,
+      card.deliveryStatus, card.installationStatus, String(card.paymentPercent ?? ''),
+      ...(card.tanks ?? []).flatMap(t => [t.itemDescription, t.remarks, t.tankSize]),
+    ];
+    return haystack.some(v => (v ?? '').toString().toLowerCase().includes(woQuery));
   }, [woQuery]);
 
   /* Updates a single card's fields (used by inline cell edits in the expanded
@@ -2434,7 +2441,7 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
   const handleGenerateReports = useCallback(async () => {
     setIsGeneratingReports(true);
     try {
-      const payload = await generateDailyReports(referenceDate);
+      const payload = await generateDailyReports(referenceDate, false);
       const generatedCount = Object.keys(payload.reports ?? {}).filter(k => k !== 'missing_templates').length;
       const missing = payload.reports?.missing_templates;
       alert(missing
@@ -2998,14 +3005,21 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
             className={`px-3 py-2 rounded-lg text-xs font-semibold border ${isGeneratingReports || !canEditSchedule ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'}`}
             title={canEditSchedule ? 'Generate all 7 schedule reports' : 'Only Admin and Delivery & Installation can generate reports'}
           >
-            {isGeneratingReports ? 'Generating...' : 'Generate 7 Reports'}
+            {isGeneratingReports ? 'Generating...' : 'Export'}
           </button>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"/>
-            <input value={woSearch} onChange={e=>setWoSearch(e.target.value)} placeholder="Search WO (e.g. 7654)"
+            <input value={woSearch} onChange={e=>setWoSearch(e.target.value)} placeholder="Search anything (WO, customer, brand, location...)"
               className="w-56 pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"/>
           </div>
+          {userRole === 'admin' && onAdminSettings && (
+            <button onClick={onAdminSettings} title="Admin Settings"
+              className="p-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+              <Settings className="w-4 h-4"/>
+            </button>
+          )}
           {/* channel switcher */}
+          {userRole === 'admin' && (
           <div className="relative" ref={chDropRef}>
             <button onClick={()=>setShowChDrop(p=>!p)}
               className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 shadow-sm transition-colors">
@@ -3019,20 +3033,21 @@ export default function ScheduleBoard({ userName, userDepartment, userRole, onCh
                   <div className="relative"><Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"/>
                     <input type="text" placeholder="Search channels…" readOnly className="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none"/></div>
                 </div>
-                {(['Quotation','Work Order','Schedule'] as ChannelType[]).map(ch=>{
+                {(['Quotation','Work Order','Schedule','Accounts & Technical'] as ChannelType[]).map(ch=>{
                   const ok=ch==='Schedule'||accessibleChannels.includes(ch);
                   return (
                     <button key={ch} disabled={!ok}
                       onClick={()=>{if(ok&&onChannelSwitch){onChannelSwitch(ch);setShowChDrop(false);}}}
                       className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-gray-50 ${!ok?'opacity-40 cursor-not-allowed':'cursor-pointer'}`}>
-                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${ch==='Quotation'?'bg-blue-100':ch==='Work Order'?'bg-orange-100':'bg-purple-100'}`}>
-                        {ch==='Quotation'?<FileText className="w-4 h-4 text-blue-600"/>:ch==='Work Order'?<ClipboardList className="w-4 h-4 text-orange-500"/>:<CalendarRange className="w-4 h-4 text-purple-600"/>}
+                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${ch==='Quotation'?'bg-blue-100':ch==='Work Order'?'bg-orange-100':ch==='Schedule'?'bg-purple-100':'bg-teal-100'}`}>
+                        {ch==='Quotation'?<FileText className="w-4 h-4 text-blue-600"/>:ch==='Work Order'?<ClipboardList className="w-4 h-4 text-orange-500"/>:ch==='Schedule'?<CalendarRange className="w-4 h-4 text-purple-600"/>:<ClipboardList className="w-4 h-4 text-teal-600"/>}
                       </span>
                       <span className={`flex-1 text-left font-medium ${ch==='Schedule'?'text-gray-900':'text-gray-700'}`}>{ch}</span>
                       {ch==='Schedule'&&<Check className="w-4 h-4 text-green-500 flex-shrink-0"/>}
                     </button>);})}
               </div>)}
         </div>
+        )}
         </div>
       </div>
 
